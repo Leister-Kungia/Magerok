@@ -59,7 +59,7 @@ log = logging.getLogger(__name__)
 # ── API & Model ───────────────────────────────────────────────────────────────
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
 LLM_MODEL       = "llama-3.3-70b-versatile"        # miễn phí, mạnh, tiếng Việt tốt
-EMBEDDING_MODEL = "nomic-embed-text-v1_5"  # Groq Embeddings API — không cần load model local
+EMBEDDING_MODEL = "intfloat/multilingual-e5-large"  # Groq Embeddings API — không cần load model local
 
 # ── ChromaDB ─────────────────────────────────────────────────────────────────
 # Đường dẫn tính từ vị trí file .py, không phụ thuộc thư mục đang chạy lệnh
@@ -431,6 +431,7 @@ Hãy tổng hợp thành một câu trả lời hoàn chỉnh, tự nhiên cho h
 
 def _khoi_tao_chroma(reset: bool = False):
     """Tạo hoặc mở ChromaDB collection."""
+    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
     client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     if reset:
         try:
@@ -441,6 +442,7 @@ def _khoi_tao_chroma(reset: bool = False):
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
+        embedding_function=DefaultEmbeddingFunction(),
     )
     log.info(f"Collection '{COLLECTION_NAME}' — {collection.count()} documents hiện có.")
     return collection
@@ -451,21 +453,14 @@ def _tao_groq_client():
     return Groq(api_key=os.getenv("GROQ_API_KEY", GROQ_API_KEY))
 
 
-def _embed(groq_client: Groq, texts: list[str]) -> list[list[float]]:
+def _embed(texts: list[str]) -> list[list[float]]:
     """
-    Gọi Groq Embeddings API để tạo vector cho danh sách văn bản.
-    Tự động chia batch nếu nhiều text (tối đa 96 text/lần).
+    Tạo vector embedding dùng ChromaDB DefaultEmbeddingFunction (onnxruntime).
+    Không cần API key, chạy hoàn toàn local.
     """
-    BATCH = 96
-    all_embeddings = []
-    for i in range(0, len(texts), BATCH):
-        batch = texts[i:i+BATCH]
-        resp = groq_client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=batch,
-        )
-        all_embeddings.extend([e.embedding for e in resp.data])
-    return all_embeddings
+    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+    ef = DefaultEmbeddingFunction()
+    return ef(texts)
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -497,7 +492,7 @@ def _chunk_text(text: str) -> list[str]:
 
 
 def _luu_vao_chroma(collection, groq_client, documents, metadatas, ids, ten_nguon):
-    """Embed documents qua Groq API rồi lưu vào ChromaDB theo batch."""
+    """Embed documents rồi lưu vào ChromaDB theo batch."""
     if not documents:
         return
     BATCH = 96
@@ -506,7 +501,7 @@ def _luu_vao_chroma(collection, groq_client, documents, metadatas, ids, ten_nguo
         batch_docs = documents[i:i+BATCH]
         batch_meta = metadatas[i:i+BATCH]
         batch_ids  = ids[i:i+BATCH]
-        embeddings = _embed(groq_client, batch_docs)
+        embeddings = _embed(batch_docs)
         collection.add(documents=batch_docs, embeddings=embeddings,
                        metadatas=batch_meta, ids=batch_ids)
     log.info(f"  Đã lưu {len(documents)} documents từ '{ten_nguon}'.")
@@ -669,7 +664,7 @@ def chay_ingest():
     print("  INGEST DỮ LIỆU TUYỂN SINH → CHROMADB")
     print("=" * 60)
 
-    import sys; reset = sys.stdin.isatty() and input("\nReset toàn bộ DB cũ? (y/N): ").strip().lower() == 'y'
+    reset = input("\nReset toàn bộ DB cũ? (y/N): ").strip().lower() == 'y'
     collection  = _khoi_tao_chroma(reset=reset)
     groq_client = _tao_groq_client()
     os.makedirs(EXCEL_DIR, exist_ok=True)
@@ -782,7 +777,7 @@ class TuVanTuyenSinh:
 
     def _tim_du_lieu(self, cau_hoi: str, loai_filter: str = None) -> str:
         """Tìm dữ liệu liên quan trong ChromaDB bằng vector search."""
-        query_vec = _embed(self.groq, [cau_hoi])[0]
+        query_vec = _embed([cau_hoi])[0]
         try:
             where   = {"loai": loai_filter} if loai_filter else None
             results = self.collection.query(
