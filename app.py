@@ -3,22 +3,23 @@ app.py — FastAPI wrapper cho tuyen_sinh_AI.py
 Render chạy file này để khởi động web server.
 
 Endpoints:
-  GET  /          → kiểm tra server còn sống
+  GET  /          → serve giao diện chat (index.html)
+  GET  /health    → kiểm tra server còn sống
   POST /hoi       → gửi câu hỏi, nhận câu trả lời
   POST /reset     → xóa lịch sử hội thoại của session
 """
 
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from tuyen_sinh_AI import TuVanTuyenSinh
 
-# ── Session store — mỗi user có bot riêng ────────────────────────────────────
+# ── Session store ─────────────────────────────────────────────────────────────
 sessions: dict[str, TuVanTuyenSinh] = {}
 
 def lay_bot(session_id: str) -> TuVanTuyenSinh:
@@ -30,7 +31,6 @@ def lay_bot(session_id: str) -> TuVanTuyenSinh:
 # ── Khởi động app ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Khởi tạo 1 bot mặc định lúc startup để load model embedding sẵn
     lay_bot("default")
     yield
 
@@ -41,34 +41,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Giới hạn body size 10MB (để nhận ảnh base64)
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
-
-class LimitBodySize(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        max_size = 10 * 1024 * 1024  # 10MB
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > max_size:
-            return Response("Request body quá lớn (tối đa 10MB).", status_code=413)
-        return await call_next(request)
-
-app.add_middleware(LimitBodySize)
-
-# Cho phép frontend gọi API (CORS)
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # production nên đổi thành domain cụ thể
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Bắt lỗi 413 từ Render proxy — trả về JSON thân thiện
+@app.exception_handler(413)
+async def request_too_large(request: Request, exc):
+    return JSONResponse(
+        status_code=413,
+        content={"detail": "File quá lớn. Vui lòng gửi ảnh nhỏ hơn 5MB."},
+    )
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class CauHoiRequest(BaseModel):
     session_id: str = "default"
-    cau_hoi: str
+    cau_hoi: str = ""
     image_base64: Optional[str] = None
     image_type: Optional[str] = "image/jpeg"
 
@@ -84,25 +78,17 @@ class ResetRequest(BaseModel):
 
 @app.get("/health")
 def health_check():
-    """Render dùng endpoint này để kiểm tra service còn sống."""
     return {"status": "ok", "message": "AI Tư Vấn Tuyển Sinh đang chạy 🎓"}
 
 @app.get("/")
 def serve_frontend():
-    """Trả về giao diện chat."""
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "index.html")
+    """Serve giao diện chat."""
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
     return FileResponse(html_path, media_type="text/html")
 
 
 @app.post("/hoi", response_model=TraLoiResponse)
 def hoi(body: CauHoiRequest):
-    """
-    Gửi câu hỏi và nhận câu trả lời.
-
-    Body JSON:
-        session_id : string — dùng để phân biệt người dùng (mặc định "default")
-        cau_hoi   : string — câu hỏi của học sinh
-    """
     if not body.cau_hoi.strip() and not body.image_base64:
         raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
     try:
@@ -122,7 +108,6 @@ def hoi(body: CauHoiRequest):
 
 @app.post("/reset")
 def reset(body: ResetRequest):
-    """Xóa lịch sử hội thoại — gọi khi người dùng bấm 'Cuộc trò chuyện mới'."""
     if body.session_id in sessions:
         sessions[body.session_id].reset_lich_su()
     return {"status": "ok", "message": f"Đã reset session '{body.session_id}'"}
@@ -132,4 +117,10 @@ def reset(body: ResetRequest):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True,
+        h11_max_incomplete_event_size=5 * 1024 * 1024,
+    )
