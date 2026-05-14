@@ -741,7 +741,7 @@ class TuVanTuyenSinh:
                 # Lưu câu hỏi gốc vào lịch sử để lần sau dùng làm context
                 self.lich_su.append({"role": "user", "content": cau_hoi})
                 self.lich_su.append({"role": "assistant", "content": can_hoi_them})
-                self.lich_su = self.lich_su[-20:]
+                self.lich_su = self.lich_su[-10:]
                 return can_hoi_them
 
         # Bước 2: Mỗi agent tìm dữ liệu + trả lời độc lập
@@ -754,7 +754,7 @@ class TuVanTuyenSinh:
         # Lưu lịch sử hội thoại (tối đa 10 lượt gần nhất)
         self.lich_su += [{"role": "user", "content": cau_hoi},
                          {"role": "assistant", "content": tra_loi}]
-        self.lich_su = self.lich_su[-20:]
+        self.lich_su = self.lich_su[-10:]
 
         return tra_loi
 
@@ -769,9 +769,10 @@ class TuVanTuyenSinh:
 
         # Ghép lịch sử hội thoại làm context
         lich_su_text = ""
-        for msg in self.lich_su[-6:]:
+        for msg in self.lich_su[-4:]:  # chỉ lấy 4 tin gần nhất
             prefix = "Bạn" if msg["role"] == "user" else "Mình"
-            lich_su_text += f"{prefix}: {msg['content']}\n"
+            noi_dung = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+            lich_su_text += f"{prefix}: {noi_dung}\n"
 
         system_prompt = """Bạn là AI tư vấn tuyển sinh đại học Việt Nam.
 Xưng "mình", gọi người hỏi là "bạn". Thân thiện, tự nhiên.
@@ -811,7 +812,7 @@ sau đó tư vấn phù hợp dựa trên thông tin trong ảnh."""
             {"role": "user",      "content": f"[Ảnh đính kèm] {cau_hoi}"},
             {"role": "assistant", "content": tra_loi},
         ]
-        self.lich_su = self.lich_su[-20:]
+        self.lich_su = self.lich_su[-10:]
         return tra_loi
 
     def reset_lich_su(self):
@@ -875,9 +876,10 @@ sau đó tư vấn phù hợp dựa trên thông tin trong ảnh."""
         du_lieu = self._tim_du_lieu(cau_hoi, loai_filter)
 
         lich_su_text = ""
-        for msg in self.lich_su[-6:]:
+        for msg in self.lich_su[-4:]:  # chỉ lấy 4 tin gần nhất
             prefix = "Bạn" if msg["role"] == "user" else "Mình"
-            lich_su_text += f"{prefix}: {msg['content']}\n"
+            noi_dung = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+            lich_su_text += f"{prefix}: {noi_dung}\n"
 
         # Agent nào dùng data thực tế → fallback web search nếu trống
         AGENT_CAN_SEARCH = {"diem_chuan", "truong", "nganh"}
