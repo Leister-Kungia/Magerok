@@ -11,6 +11,8 @@ Endpoints:
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -80,10 +82,16 @@ class ResetRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     """Render dùng endpoint này để kiểm tra service còn sống."""
     return {"status": "ok", "message": "AI Tư Vấn Tuyển Sinh đang chạy 🎓"}
+
+@app.get("/")
+def serve_frontend():
+    """Trả về giao diện chat."""
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "index.html")
+    return FileResponse(html_path, media_type="text/html")
 
 
 @app.post("/hoi", response_model=TraLoiResponse)
