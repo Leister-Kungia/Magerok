@@ -747,6 +747,50 @@ class TuVanTuyenSinh:
 
         return tra_loi
 
+    def hoi_voi_anh(self, cau_hoi: str, image_base64: str, image_type: str = "image/jpeg") -> str:
+        """
+        Nhận câu hỏi kèm ảnh → phân tích ảnh bằng vision model → trả lời.
+        Kết quả phân tích ảnh được bổ sung vào context rồi gọi pipeline thông thường.
+        """
+        log.info("[Vision] Đang phân tích ảnh...")
+
+        # Bước 1: Gọi vision model phân tích ảnh
+        try:
+            vision_resp = self.groq.chat.completions.create(
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{image_type};base64,{image_base64}"
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Hãy mô tả chi tiết nội dung ảnh này bằng tiếng Việt. "
+                                    "Nếu ảnh có văn bản (bảng điểm, học bạ, phiếu điểm, thông báo tuyển sinh...), "
+                                    "hãy trích xuất đầy đủ các con số và thông tin quan trọng."
+                                ),
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=800,
+            )
+            mo_ta_anh = vision_resp.choices[0].message.content.strip()
+            log.info(f"[Vision] Mô tả ảnh: {mo_ta_anh[:100]}...")
+        except Exception as e:
+            log.warning(f"[Vision] Lỗi phân tích ảnh: {e}")
+            mo_ta_anh = "(Không thể phân tích ảnh)"
+
+        # Bước 2: Ghép mô tả ảnh vào câu hỏi rồi xử lý pipeline thông thường
+        cau_hoi_day_du = f"{cau_hoi}\n\n[Nội dung ảnh đính kèm]: {mo_ta_anh}".strip()
+        return self.hoi(cau_hoi_day_du)
+
     def reset_lich_su(self):
         """Xóa lịch sử — gọi khi người dùng bắt đầu hội thoại mới."""
         self.lich_su = []
