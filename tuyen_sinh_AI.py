@@ -502,6 +502,20 @@ def _chunk_text(text: str) -> list[str]:
     return chunks
 
 
+def _gioi_han_prompt(system: str, user: str, max_ky_tu: int = 6000) -> tuple[str, str]:
+    """
+    Đảm bảo tổng system + user prompt không vượt max_ky_tu.
+    Nếu vượt, cắt bớt phần user (thường chứa du_lieu + lich_su dài nhất).
+    """
+    tong = len(system) + len(user)
+    if tong <= max_ky_tu:
+        return system, user
+    can_cat = tong - max_ky_tu
+    if len(user) > can_cat + 200:
+        user = user[:len(user) - can_cat - 100] + "\n...[đã rút gọn]"
+    return system, user
+
+
 def _luu_vao_chroma(collection, groq_client, documents, metadatas, ids, ten_nguon):
     """Embed documents qua Groq API rồi lưu vào ChromaDB theo batch."""
     if not documents:
@@ -912,22 +926,24 @@ sau đó tư vấn phù hợp dựa trên thông tin trong ảnh."""
                     # Rate limit compound-mini → fallback về model thường
                     log.warning(f"[{ten_agent}] compound-mini rate limit → fallback")
                     import time; time.sleep(3)
+                    _sys, _usr = _gioi_han_prompt(system_prompt, build_fn(du_lieu, cau_hoi, lich_su_text))
                     resp = self.groq.chat.completions.create(
                         model=LLM_MODEL,
                         messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user",   "content": build_fn(du_lieu, cau_hoi, lich_su_text)},
+                            {"role": "system", "content": _sys},
+                            {"role": "user",   "content": _usr},
                         ],
                         max_tokens=1200,
                     )
                 else:
                     raise
         else:
+            _sys, _usr = _gioi_han_prompt(system_prompt, build_fn(du_lieu, cau_hoi, lich_su_text))
             resp = self.groq.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": build_fn(du_lieu, cau_hoi, lich_su_text)},
+                    {"role": "system", "content": _sys},
+                    {"role": "user",   "content": _usr},
                 ],
                 max_tokens=1200,
             )
