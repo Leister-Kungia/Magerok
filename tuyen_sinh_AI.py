@@ -60,7 +60,7 @@ log = logging.getLogger(__name__)
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
 LLM_MODEL        = "llama-3.3-70b-versatile"        # miễn phí, mạnh, tiếng Việt tốt
 LLM_MODEL_SEARCH = "groq/compound-mini"             # tự search web khi không có data local
-EMBEDDING_MODEL = "nomic-embed-text-v1.5"  # Groq Embeddings API — không cần load model local
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # ~50MB, nhanh, chạy local không cần API
 
 # ── ChromaDB ─────────────────────────────────────────────────────────────────
 # Đường dẫn tính từ vị trí file .py, không phụ thuộc thư mục đang chạy lệnh
@@ -466,16 +466,16 @@ def _tao_groq_client():
     return Groq(api_key=os.getenv("GROQ_API_KEY", GROQ_API_KEY))
 
 
+# Cache model để không load lại mỗi lần gọi
+_embed_model = None
+
 def _embed(texts: list[str]) -> list[list[float]]:
-    """Tạo embedding qua Groq API — không cần load model local."""
-    client = Groq(api_key=os.getenv("GROQ_API_KEY", GROQ_API_KEY))
-    BATCH = 96
-    all_embeddings = []
-    for i in range(0, len(texts), BATCH):
-        batch = texts[i:i+BATCH]
-        resp = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-        all_embeddings.extend([e.embedding for e in resp.data])
-    return all_embeddings
+    """Tạo embedding dùng SentenceTransformer all-MiniLM-L6-v2 (~50MB)."""
+    global _embed_model
+    if _embed_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embed_model = SentenceTransformer(EMBEDDING_MODEL)
+    return _embed_model.encode(texts, normalize_embeddings=True).tolist()
 
 
 def _chunk_text(text: str) -> list[str]:
