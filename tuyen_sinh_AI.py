@@ -506,7 +506,19 @@ def _chunk_text(text: str) -> list[str]:
     return chunks
 
 
-def _gioi_han_prompt(system: str, user: str, max_ky_tu: int = 6000) -> tuple[str, str]:
+def _gioi_han_prompt(system: str, user: str, max_ky_tu: int = 12000) -> tuple[str, str]:
+    tong = len(system) + len(user)
+    if tong <= max_ky_tu:
+        return system, user
+    # Ưu tiên giữ system, cắt user trước
+    user_max = max_ky_tu - min(len(system), 4000)
+    if user_max > 200:
+        user = user[:user_max] + "\n...[đã rút gọn]"
+    else:
+        # System quá dài → cắt cả 2
+        system = system[:4000] + "\n...[đã rút gọn]"
+        user = user[:max_ky_tu - 4000] + "\n...[đã rút gọn]"
+    return system, user
     """
     Đảm bảo tổng system + user prompt không vượt max_ky_tu.
     Nếu vượt, cắt bớt phần user (thường chứa du_lieu + lich_su dài nhất).
