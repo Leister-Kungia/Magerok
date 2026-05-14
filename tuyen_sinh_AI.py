@@ -40,6 +40,7 @@ import uuid
 import json
 import time
 import logging
+from datetime import datetime
 
 # Thư viện bên ngoài — cài bằng: pip install -r requirements.txt
 import chromadb
@@ -58,7 +59,8 @@ log = logging.getLogger(__name__)
 
 # ── API & Model ───────────────────────────────────────────────────────────────
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
-LLM_MODEL       = "llama-3.3-70b-versatile"        # miễn phí, mạnh, tiếng Việt tốt
+LLM_MODEL        = "llama-3.3-70b-versatile"        # miễn phí, mạnh, tiếng Việt tốt
+LLM_MODEL_SEARCH = "groq/compound-mini"             # tự search web khi không có data local
 EMBEDDING_MODEL = "intfloat/multilingual-e5-large"  # Groq Embeddings API — không cần load model local
 
 # ── ChromaDB ─────────────────────────────────────────────────────────────────
@@ -102,6 +104,13 @@ WEBSITES_TO_CRAWL = [
 #   - [TÊN]_SYSTEM : mô tả vai trò, viết 1 lần và cố định
 #   - build_[tên]_prompt() : ghép dữ liệu + câu hỏi thành prompt hoàn chỉnh
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+def _ngay_hom_nay() -> str:
+    """Trả về chuỗi ngày giờ hiện tại để inject vào prompt."""
+    now = datetime.now()
+    thu = ["Thứ Hai","Thứ Ba","Thứ Tư","Thứ Năm","Thứ Sáu","Thứ Bảy","Chủ Nhật"][now.weekday()]
+    return f"{thu}, ngày {now.day} tháng {now.month} năm {now.year}"
 
 # ── Orchestrator — "Lễ tân" phân loại câu hỏi ────────────────────────────────
 
@@ -152,22 +161,24 @@ def build_orchestrator_prompt(cau_hoi: str) -> str:
 
 DIEM_CHUAN_SYSTEM = """
 Bạn là người anh/chị đi trước đang giúp em học sinh hiểu về điểm chuẩn đại học.
-Xưng "mình", gọi người hỏi là "bạn". Nói chuyện tự nhiên, thân thiện.
+Xưng "mình", gọi người hỏi là "bạn". Nói chuyện tự nhiên, thân thiện, dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Bạn sẽ được cung cấp dữ liệu điểm chuẩn thực tế. Dựa vào đó để tư vấn.
 
 Nguyên tắc:
-1. Luôn dùng số liệu cụ thể từ dữ liệu được cung cấp
-2. So sánh điểm học sinh với điểm chuẩn — cao hơn thì nói "an toàn",
+1. Luôn dùng số liệu cụ thể từ dữ liệu được cung cấp 📊
+2. So sánh điểm học sinh với điểm chuẩn — cao hơn thì nói "an toàn" ✅,
    thấp hơn thì gợi ý phương án dự phòng cụ thể
-3. Đề cập xu hướng điểm qua các năm nếu có dữ liệu
+3. Đề cập xu hướng điểm qua các năm nếu có dữ liệu 📈
 4. Nếu không có dữ liệu cho trường/ngành được hỏi, nói thẳng và
    hướng dẫn kiểm tra trang chính thức
 5. Tuyệt đối không bịa ra số liệu
 6. Cuối câu trả lời, nếu cần thêm thông tin để tư vấn tốt hơn,
    hỏi thêm 1 câu ngắn gọn, tự nhiên
 
-Trả lời bằng tiếng Việt. Ngắn gọn, đi thẳng vào vấn đề.
+Trả lời bằng tiếng Việt. Ngắn gọn, đi thẳng vào vấn đề. Dùng emoji tự nhiên (không lạm dụng).
 """
 
 def build_diem_chuan_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
@@ -188,18 +199,20 @@ và hướng dẫn học sinh tìm thông tin ở đâu."""
 
 TRUONG_SYSTEM = """
 Bạn là người anh/chị đang chia sẻ thật về các trường đại học Việt Nam.
-Xưng "mình", gọi người hỏi là "bạn". Nói như đang nhắn tin cho bạn bè, không như viết báo cáo.
+Xưng "mình", gọi người hỏi là "bạn". Nói như đang nhắn tin cho bạn bè, không như viết báo cáo. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Bạn sẽ được cung cấp thông tin về trường từ cơ sở dữ liệu.
 
 Nguyên tắc:
-1. Trả lời đúng điều bạn hỏi — không liệt kê tất cả
-2. Nêu cả ưu điểm lẫn điểm cần cân nhắc — tư vấn thật, không quảng cáo
-3. Nếu so sánh nhiều trường, phân tích rõ ràng theo từng tiêu chí
+1. Trả lời đúng điều bạn hỏi — không liệt kê tất cả 🎯
+2. Nêu cả ưu điểm lẫn điểm cần cân nhắc — tư vấn thật, không quảng cáo ✅
+3. Nếu so sánh nhiều trường, phân tích rõ ràng theo từng tiêu chí 🏫
 4. Chỉ nói những gì có trong dữ liệu — không bịa thông tin
 5. Cuối câu trả lời hỏi thêm nếu cần để hiểu bạn muốn gì hơn
 
-Trả lời bằng tiếng Việt.
+Trả lời bằng tiếng Việt. Dùng emoji tự nhiên (không lạm dụng).
 """
 
 def build_truong_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
@@ -212,16 +225,18 @@ def build_truong_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
 
 NGANH_SYSTEM = """
 Bạn là người anh/chị đang làm trong ngành, chia sẻ thật về nghề nghiệp.
-Xưng "mình", gọi người hỏi là "bạn". Tự nhiên như đang nói chuyện thật.
+Xưng "mình", gọi người hỏi là "bạn". Tự nhiên như đang nói chuyện thật. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Nguyên tắc:
-1. Giải thích theo ngôn ngữ dễ hiểu — không dùng từ kỹ thuật mà không giải thích
-2. Nêu cụ thể: học những môn gì, ra trường làm ở đâu, mức lương thực tế
+1. Giải thích theo ngôn ngữ dễ hiểu — không dùng từ kỹ thuật mà không giải thích 💡
+2. Nêu cụ thể: học những môn gì, ra trường làm ở đâu, mức lương thực tế 💼
 3. Trả lời thẳng vào câu hỏi
-4. Nếu phù hợp, gợi ý thêm 1-2 ngành liên quan để bạn cân nhắc thêm
+4. Nếu phù hợp, gợi ý thêm 1-2 ngành liên quan để bạn cân nhắc thêm 🔍
 5. Cuối trả lời, hỏi thêm 1 câu để hiểu bạn hơn (ví dụ: bạn thiên về lý thuyết hay thực hành?)
 
-Trả lời bằng tiếng Việt. Thân thiện, thực tế.
+Trả lời bằng tiếng Việt. Thân thiện, thực tế. Dùng emoji tự nhiên (không lạm dụng).
 """
 
 def build_nganh_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
@@ -234,16 +249,18 @@ def build_nganh_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
 
 TO_HOP_SYSTEM = """
 Bạn là người anh/chị giải thích rõ về tổ hợp môn xét tuyển đại học Việt Nam.
-Xưng "mình", gọi người hỏi là "bạn". Giải thích đơn giản, dễ nhớ.
+Xưng "mình", gọi người hỏi là "bạn". Giải thích đơn giản, dễ nhớ. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Nguyên tắc:
-1. Giải thích tổ hợp rõ ràng — ví dụ "A00 gồm Toán, Lý, Hóa"
+1. Giải thích tổ hợp rõ ràng — ví dụ "A00 gồm Toán, Lý, Hóa" 📚
 2. Liệt kê đầy đủ các tổ hợp có thể dùng để xét tuyển ngành được hỏi
-3. Nếu bạn biết tổ hợp của mình, gợi ý ngành phù hợp
+3. Nếu bạn biết tổ hợp của mình, gợi ý ngành phù hợp 🎯
 4. Nhắc kiểm tra lại đề án tuyển sinh từng trường vì có thể khác nhau
 5. Hỏi thêm nếu chưa biết tổ hợp của bạn để tư vấn trúng hơn
 
-Trả lời bằng tiếng Việt. Chính xác, dễ hiểu.
+Trả lời bằng tiếng Việt. Chính xác, dễ hiểu. Dùng emoji tự nhiên (không lạm dụng).
 """
 
 def build_to_hop_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
@@ -256,7 +273,9 @@ def build_to_hop_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
 
 HUONG_NGHIEP_SYSTEM = """
 Bạn là người anh/chị thật sự quan tâm, đang ngồi nói chuyện 1-1 với em học sinh.
-Xưng "mình", gọi người hỏi là "bạn". Không phải tư vấn viên, không phải chatbot — là người thật.
+Xưng "mình", gọi người hỏi là "bạn". Không phải tư vấn viên, không phải chatbot — là người thật. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Bạn tiếp cận theo 4 chiều: ĐAM MÊ, TỐ CHẤT, TIỀM NĂNG, và ĐỊNH HƯỚNG THỬ NGHIỆM.
 
@@ -297,7 +316,9 @@ Trả lời bằng tiếng Việt. Thân thiện, thực tế, có chiều sâu.
 
 HOC_TAP_SYSTEM = """
 Bạn là người anh/chị đang học hoặc đã ra trường ngành đó, chia sẻ lộ trình học tập thực tế.
-Xưng "mình", gọi người hỏi là "bạn". Nói chuyện thật, không sách vở.
+Xưng "mình", gọi người hỏi là "bạn". Nói chuyện thật, không sách vở. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Khi được hỏi về cách học hoặc chuẩn bị cho một ngành, hãy tư vấn:
 
@@ -343,7 +364,9 @@ hoặc đang ở giai đoạn nào, hỏi thêm trước khi đưa ra lộ trìn
 
 KIEN_THUC_SYSTEM = """
 Bạn là người anh/chị đang dạy kèm, giải thích kiến thức theo kiểu dễ hiểu nhất.
-Xưng "mình", gọi người hỏi là "bạn". Kiên nhẫn, vui vẻ, không phán xét khi hỏi câu "ngây thơ".
+Xưng "mình", gọi người hỏi là "bạn". Kiên nhẫn, vui vẻ, không phán xét khi hỏi câu "ngây thơ". Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Khi giải thích kiến thức:
 
@@ -392,7 +415,9 @@ Nếu chưa đủ thông tin về học sinh, hãy hỏi thêm trước khi đư
 
 AGGREGATOR_SYSTEM = """
 Bạn tổng hợp thông tin từ nhiều nguồn và viết thành 1 câu trả lời hoàn chỉnh.
-Xưng "mình", gọi người hỏi là "bạn". Viết tự nhiên như đang nhắn tin, không như bài luận.
+Xưng "mình", gọi người hỏi là "bạn". Viết tự nhiên như đang nhắn tin, không như bài luận. Dùng emoji phù hợp để tạo cảm giác gần gũi.
+
+Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Nguyên tắc:
 1. Kết hợp thông tin tự nhiên — không copy nguyên xi, không lặp lại
@@ -401,7 +426,7 @@ Nguyên tắc:
 4. Kết thúc bằng 1 câu hỏi gợi mở ngắn, tự nhiên nếu bạn cần tư vấn thêm
 5. Nếu nhiều agent đề xuất hỏi thêm, chỉ hỏi 1 câu thôi — câu quan trọng nhất
 
-Trả lời bằng tiếng Việt. Thân thiện, tự nhiên.
+Trả lời bằng tiếng Việt. Thân thiện, tự nhiên, có emoji.
 """
 
 def build_aggregator_prompt(cau_hoi_goc: str, cac_ket_qua: dict) -> str:
@@ -758,6 +783,7 @@ class TuVanTuyenSinh:
         try:
             vision_resp = self.groq.chat.completions.create(
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
+                max_tokens=2000,
                 messages=[
                     {
                         "role": "user",
@@ -771,15 +797,20 @@ class TuVanTuyenSinh:
                             {
                                 "type": "text",
                                 "text": (
-                                    "Hãy mô tả chi tiết nội dung ảnh này bằng tiếng Việt. "
-                                    "Nếu ảnh có văn bản (bảng điểm, học bạ, phiếu điểm, thông báo tuyển sinh...), "
-                                    "hãy trích xuất đầy đủ các con số và thông tin quan trọng."
+                                    "Đây là ảnh liên quan đến tuyển sinh đại học Việt Nam. "
+                                    "Hãy đọc và trích xuất TOÀN BỘ nội dung văn bản trong ảnh, "
+                                    "đặc biệt chú ý:\n"
+                                    "- Nếu là bảng dữ liệu/CSV: đọc từng dòng, từng cột, "
+                                    "liệt kê đầy đủ tất cả tên ngành, mã ngành, điểm số, năm, tổ hợp xét tuyển. "
+                                    "KHÔNG bỏ sót dòng nào, KHÔNG tóm tắt.\n"
+                                    "- Nếu là bảng điểm/học bạ: đọc từng môn, từng điểm số chính xác.\n"
+                                    "- Nếu là thông báo/văn bản: chép lại nguyên văn nội dung quan trọng.\n"
+                                    "Trả lời bằng tiếng Việt. Liệt kê đầy đủ, không tóm tắt, không bỏ sót."
                                 ),
                             },
                         ],
                     }
                 ],
-                max_tokens=800,
             )
             mo_ta_anh = vision_resp.choices[0].message.content.strip()
             log.info(f"[Vision] Mô tả ảnh: {mo_ta_anh[:100]}...")
@@ -834,7 +865,9 @@ class TuVanTuyenSinh:
         return "\n---\n".join(docs) if docs else "Không có dữ liệu liên quan trong hệ thống."
 
     def _chay_agent(self, ten_agent: str, cau_hoi: str) -> str:
-        """Chạy một specialist agent: tìm dữ liệu → ghép prompt → gọi LLM."""
+        """Chạy một specialist agent: tìm dữ liệu → ghép prompt → gọi LLM.
+        Nếu không có data local và agent là diem_chuan/truong/nganh → tự search web.
+        """
         cau_hinh = {
             "diem_chuan":   (DIEM_CHUAN_SYSTEM,   build_diem_chuan_prompt,   "diem_chuan"),
             "truong":       (TRUONG_SYSTEM,        build_truong_prompt,       "thong_tin_truong"),
@@ -852,22 +885,62 @@ class TuVanTuyenSinh:
             prefix = "Bạn" if msg["role"] == "user" else "Mình"
             lich_su_text += f"{prefix}: {msg['content']}\n"
 
-        resp = self.groq.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": build_fn(du_lieu, cau_hoi, lich_su_text)},
-            ],
-            max_tokens=1200,
-        )
+        # Inject ngày giờ thực vào system prompt
+        system_prompt_final = system_prompt.replace("{ngay_hom_nay}", _ngay_hom_nay())
+
+        # Nếu không có data local → thử web search
+        AGENT_CAN_SEARCH = {"diem_chuan", "truong", "nganh"}
+        khong_co_data = "Không có dữ liệu" in du_lieu
+        dung_web_search = khong_co_data and ten_agent in AGENT_CAN_SEARCH
+
+        if dung_web_search:
+            log.info(f"[{ten_agent}] Không có data local → dùng web search")
+            prompt_web = (f"{lich_su_text}\n" if lich_su_text else "") + (
+                f"Tìm kiếm thông tin mới nhất về tuyển sinh đại học Việt Nam để trả lời:\n\n"
+                f"{cau_hoi}\n\nTư vấn bằng tiếng Việt, xưng 'mình', gọi 'bạn'. "
+                f"Nêu rõ nguồn và năm nếu có thông tin điểm chuẩn."
+            )
+            try:
+                resp = self.groq.chat.completions.create(
+                    model=LLM_MODEL_SEARCH,
+                    messages=[
+                        {"role": "system", "content": system_prompt_final},
+                        {"role": "user",   "content": prompt_web},
+                    ],
+                    max_tokens=1200,
+                )
+            except Exception as e:
+                if "429" in str(e) or "rate_limit" in str(e):
+                    log.warning(f"[{ten_agent}] compound-mini rate limit → fallback model thường")
+                    import time; time.sleep(3)
+                    resp = self.groq.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_prompt_final},
+                            {"role": "user",   "content": build_fn(du_lieu, cau_hoi, lich_su_text)},
+                        ],
+                        max_tokens=1200,
+                    )
+                else:
+                    raise
+        else:
+            resp = self.groq.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt_final},
+                    {"role": "user",   "content": build_fn(du_lieu, cau_hoi, lich_su_text)},
+                ],
+                max_tokens=1200,
+            )
         return resp.choices[0].message.content.strip()
 
     def _tong_hop(self, cau_hoi_goc: str, cac_ket_qua: dict) -> str:
         """Gọi Aggregator tổng hợp kết quả từ nhiều agent thành 1 câu trả lời."""
+        aggregator_final = AGGREGATOR_SYSTEM.replace("{ngay_hom_nay}", _ngay_hom_nay())
         resp = self.groq.chat.completions.create(
             model=LLM_MODEL,
             messages=[
-                {"role": "system", "content": AGGREGATOR_SYSTEM},
+                {"role": "system", "content": aggregator_final},
                 {"role": "user",   "content": build_aggregator_prompt(cau_hoi_goc, cac_ket_qua)},
             ],
             max_tokens=1200,

@@ -1,12 +1,15 @@
 """
 app.py — FastAPI wrapper cho tuyen_sinh_AI.py
+Hỗ trợ text + ảnh đính kèm (base64), serve index.html từ static/
 """
 
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from typing import Optional
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tuyen_sinh_AI import TuVanTuyenSinh
 
@@ -18,18 +21,12 @@ def lay_bot(session_id: str) -> TuVanTuyenSinh:
         sessions[session_id] = TuVanTuyenSinh()
     return sessions[session_id]
 
-# ── Khởi động app ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     lay_bot("default")
     yield
 
-app = FastAPI(
-    title="AI Tư Vấn Tuyển Sinh",
-    description="Hỏi về điểm chuẩn, ngành học, định hướng nghề nghiệp",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="AI Tư Vấn Tuyển Sinh", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,7 +39,9 @@ app.add_middleware(
 
 class CauHoiRequest(BaseModel):
     session_id: str = "default"
-    cau_hoi: str
+    cau_hoi: str = ""
+    image_base64: Optional[str] = None   # base64 ảnh (không có data: prefix)
+    image_type: Optional[str] = "image/jpeg"
 
 class TraLoiResponse(BaseModel):
     session_id: str
@@ -51,24 +50,46 @@ class TraLoiResponse(BaseModel):
 class ResetRequest(BaseModel):
     session_id: str = "default"
 
+# ── Serve frontend ────────────────────────────────────────────────────────────
+_BASE = os.path.dirname(os.path.abspath(__file__))
+
+# Serve file tĩnh (ảnh, JS, CSS...) nếu có thư mục static/
+_static_dir = os.path.join(_BASE, "static")
+if os.path.exists(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+@app.api_route("/", methods=["GET", "HEAD"])
+def serve_frontend():
+    """Trả về index.html — ưu tiên static/index.html, fallback index.html cùng thư mục."""
+    for path in [
+        os.path.join(_BASE, "static", "index.html"),
+        os.path.join(_BASE, "index.html"),
+    ]:
+        if os.path.exists(path):
+            return FileResponse(path, media_type="text/html")
+    return {"status": "ok", "message": "AI Tư Vấn Tuyển Sinh 🎓 — đặt index.html vào thư mục static/"}
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
-    return {"status": "ok", "message": "AI Tư Vấn Tuyển Sinh đang chạy 🎓"}
-
-@app.api_route("/", methods=["GET", "HEAD"])
-def serve_frontend():
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "index.html")
-    return FileResponse(html_path, media_type="text/html")
+    return {"status": "ok"}
 
 @app.post("/hoi", response_model=TraLoiResponse)
 def hoi(body: CauHoiRequest):
-    if not body.cau_hoi.strip():
+    """Nhận câu hỏi (+ ảnh tuỳ chọn) và trả về câu trả lời."""
+    if not body.cau_hoi.strip() and not body.image_base64:
         raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
     try:
         bot = lay_bot(body.session_id)
-        tra_loi = bot.hoi(body.cau_hoi)
+        if body.image_base64:
+            tra_loi = bot.hoi_voi_anh(
+                cau_hoi=body.cau_hoi or "(Xem ảnh đính kèm)",
+                image_base64=body.image_base64,
+                image_type=body.image_type or "image/jpeg",
+            )
+        else:
+            tra_loi = bot.hoi(body.cau_hoi)
         return TraLoiResponse(session_id=body.session_id, tra_loi=tra_loi)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
