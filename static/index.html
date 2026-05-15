@@ -1732,50 +1732,32 @@
     let accessToken = null;
 
     // Kiểm tra auth khi load trang
+    let _authReady = false;
+
     async function initAuth() {
-      // Nếu URL có hash từ OAuth callback → để Supabase tự parse trước
-      if (window.location.hash && window.location.hash.includes('access_token')) {
-        // Supabase tự xử lý hash, chờ onAuthStateChange bắt được
-        sb.auth.onAuthStateChange(async (_event, newSession) => {
-          if (newSession) {
-            currentUser = newSession.user;
-            accessToken = newSession.access_token;
-            // Xóa hash khỏi URL cho sạch
-            history.replaceState(null, '', window.location.pathname);
-            const nameEl = document.getElementById('user-display-name');
-            if (nameEl) nameEl.textContent = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Bạn';
-          } else {
-            window.location.href = '/static/login.html';
-          }
-        });
-        return;
-      }
-
-      // Trường hợp thông thường — đọc session từ localStorage
-      const { data: { session } } = await sb.auth.getSession();
-      if (!session) {
-        window.location.href = '/static/login.html';
-        return;
-      }
-      currentUser = session.user;
-      accessToken = session.access_token;
-
-      // Hiện tên user trên topbar nếu có element
-      const nameEl = document.getElementById('user-display-name');
-      if (nameEl) nameEl.textContent = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Bạn';
-
-      // Refresh token tự động
-      sb.auth.onAuthStateChange((_event, newSession) => {
-        if (newSession) { accessToken = newSession.access_token; }
-        else { window.location.href = '/static/login.html'; }
+      // onAuthStateChange là nguồn duy nhất — xử lý cả hash OAuth lẫn session thường
+      sb.auth.onAuthStateChange((_event, session) => {
+        if (_event === 'SIGNED_OUT') {
+          window.location.href = '/static/login.html';
+          return;
+        }
+        if (session) {
+          currentUser = session.user;
+          accessToken = session.access_token;
+          if (window.location.hash) history.replaceState(null, '', window.location.pathname);
+          const nameEl = document.getElementById('user-display-name');
+          if (nameEl) nameEl.textContent = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'Bạn';
+          _authReady = true;
+        } else if (_authReady) {
+          window.location.href = '/static/login.html';
+        }
       });
-    }
 
-    async function logout() {
-      await sb.auth.signOut();
-      window.location.href = '/static/login.html';
+      // Sau 4 giây không có session → về login
+      setTimeout(() => {
+        if (!_authReady) window.location.href = '/static/login.html';
+      }, 4000);
     }
-
     initAuth();
 
     /* =========================================
