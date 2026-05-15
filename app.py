@@ -1,17 +1,25 @@
 """
-app.py — FastAPI wrapper cho tuyen_sinh_AI.py
-Hỗ trợ text + ảnh đính kèm (base64), serve index.html từ static/
+app.py — FastAPI + Supabase auth + tuyen_sinh_AI
 """
 
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tuyen_sinh_AI import TuVanTuyenSinh
+
+# Supabase Python client để verify JWT
+try:
+    from supabase import create_client, Client as SupabaseClient
+    _SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
+    _SUPABASE_ANON = os.getenv("SUPABASE_ANON_KEY", "")
+    sb: SupabaseClient = create_client(_SUPABASE_URL, _SUPABASE_ANON) if _SUPABASE_URL else None
+except ImportError:
+    sb = None
 
 # ── Session store ─────────────────────────────────────────────────────────────
 sessions: dict[str, TuVanTuyenSinh] = {}
@@ -26,7 +34,7 @@ async def lifespan(app: FastAPI):
     lay_bot("default")
     yield
 
-app = FastAPI(title="AI Tư Vấn Tuyển Sinh", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Magerok AI", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,53 +43,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
+# ── Auth helper ───────────────────────────────────────────────────────────────
+def get_user_id(authorization: Optional[str] = Header(default=None)) -> str:
+    """
+    Lấy user_id từ Supabase JWT trong header Authorization: Bearer <token>
+    Nếu chưa cấu hình Supabase → fallback về 'anonymous' (dev mode)
+    """
+    if not sb or not _SUPABASE_URL:
+        return "anonymous"  # dev mode — không cần auth
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Chưa đăng nhập.")
+    token = authorization.split(" ", 1)[1]
+    try:
+        user = sb.auth.get_user(token)
+        return user.user.id
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token không hợp lệ hoặc đã hết hạn.")
 
+# ── Schemas ───────────────────────────────────────────────────────────────────
 class CauHoiRequest(BaseModel):
-    session_id: str = "default"
     cau_hoi: str = ""
-    image_base64: Optional[str] = None   # base64 ảnh (không có data: prefix)
+    image_base64: Optional[str] = None
     image_type: Optional[str] = "image/jpeg"
 
 class TraLoiResponse(BaseModel):
-    session_id: str
     tra_loi: str
+    user_id: str
 
 class ResetRequest(BaseModel):
-    session_id: str = "default"
+    pass  # user_id lấy từ token
 
-# ── Serve frontend ────────────────────────────────────────────────────────────
+# ── Serve static ──────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(os.path.abspath(__file__))
-
-# Serve file tĩnh (ảnh, JS, CSS...) nếu có thư mục static/
-_static_dir = os.path.join(_BASE, "static")
-if os.path.exists(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+_static = os.path.join(_BASE, "static")
+if os.path.exists(_static):
+    app.mount("/static", StaticFiles(directory=_static), name="static")
 
 @app.api_route("/", methods=["GET", "HEAD"])
-def serve_frontend():
-    """Trả về index.html — ưu tiên static/index.html, fallback index.html cùng thư mục."""
-    for path in [
-        os.path.join(_BASE, "static", "index.html"),
-        os.path.join(_BASE, "index.html"),
-    ]:
-        if os.path.exists(path):
-            return FileResponse(path, media_type="text/html")
-    return {"status": "ok", "message": "AI Tư Vấn Tuyển Sinh 🎓 — đặt index.html vào thư mục static/"}
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+def root():
+    for p in [os.path.join(_BASE, "static", "login.html"),
+              os.path.join(_BASE, "login.html")]:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html")
+    return {"status": "ok", "message": "Magerok AI 🎓"}
 
 @app.api_route("/health", methods=["GET", "HEAD"])
-def health_check():
+def health():
     return {"status": "ok"}
 
+# ── Chat endpoints ────────────────────────────────────────────────────────────
 @app.post("/hoi", response_model=TraLoiResponse)
-def hoi(body: CauHoiRequest):
-    """Nhận câu hỏi (+ ảnh tuỳ chọn) và trả về câu trả lời."""
+def hoi(body: CauHoiRequest, user_id: str = Depends(get_user_id)):
     if not body.cau_hoi.strip() and not body.image_base64:
         raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
     try:
-        bot = lay_bot(body.session_id)
+        bot = lay_bot(user_id)  # mỗi user có bot riêng
         if body.image_base64:
             tra_loi = bot.hoi_voi_anh(
                 cau_hoi=body.cau_hoi or "(Xem ảnh đính kèm)",
@@ -90,15 +106,15 @@ def hoi(body: CauHoiRequest):
             )
         else:
             tra_loi = bot.hoi(body.cau_hoi)
-        return TraLoiResponse(session_id=body.session_id, tra_loi=tra_loi)
+        return TraLoiResponse(tra_loi=tra_loi, user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/reset")
-def reset(body: ResetRequest):
-    if body.session_id in sessions:
-        sessions[body.session_id].reset_lich_su()
-    return {"status": "ok", "message": f"Đã reset session '{body.session_id}'"}
+def reset(user_id: str = Depends(get_user_id)):
+    if user_id in sessions:
+        sessions[user_id].reset_lich_su()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
