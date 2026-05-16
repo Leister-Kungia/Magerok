@@ -94,6 +94,9 @@ def _page(name: str):
 def root():    return _page("landing.html")
 
 
+@app.api_route("/demo",   methods=["GET","HEAD"])
+def demo():    return _page("demo.html")
+
 @app.api_route("/login",  methods=["GET","HEAD"])
 def login():   return _page("login.html")
 
