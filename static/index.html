@@ -2,7 +2,6 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg viewBox='0 0 64 64' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='64' height='64' rx='14' fill='%231F3A5F'/%3E%3Cpath d='M32 8C19.85 8 10 17.85 10 30C10 42.15 19.85 52 32 52C44.15 52 54 42.15 54 30C54 17.85 44.15 8 32 8Z' stroke='white' stroke-width='3.2' opacity='.92'/%3E%3Cpath d='M32 18L37.8 30L32 42L26.2 30L32 18Z' fill='%232EC4B6' stroke='white' stroke-width='2.4'/%3E%3Cpath d='M23 48L17 56L29 53.6L23 48Z' fill='white' opacity='.92'/%3E%3C/svg%3E">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Magerok — AI tư vấn tuyển sinh cá nhân hóa</title>
   <meta name="description" content="Magerok là website AI tư vấn tuyển sinh giúp học sinh và phụ huynh chọn ngành, chọn trường, theo dõi deadline, tìm học bổng và xây lộ trình hồ sơ." />
@@ -1836,6 +1835,7 @@ Phong cách trả lời:
 
     function newChat() {
       activeConvId = null;
+      currentHistoryId = null;  // reset history_id cho cuộc trò chuyện mới
       pendingFile = null;
       document.getElementById('emptyState').style.display = 'flex';
       document.getElementById('chatMessages').innerHTML = document.getElementById('emptyState').outerHTML;
@@ -2009,7 +2009,7 @@ Phong cách trả lời:
       const response = await fetch('/hoi', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ cau_hoi, image_base64, image_type }),
+        body: JSON.stringify({ cau_hoi, image_base64, image_type, history_id: currentHistoryId }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -2018,6 +2018,8 @@ Phong cách trả lời:
       // Bọc kết quả thành stream-like object để tương thích với code cũ
       const data = await response.json();
       const text = data.tra_loi || '';
+      // Lưu history_id cho các tin nhắn tiếp theo
+      if (data.history_id) currentHistoryId = data.history_id;
       // Giả lập SSE stream từ response thường
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
