@@ -7,12 +7,11 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tuyen_sinh_AI import TuVanTuyenSinh
 
-# Supabase Python client để verify JWT
 try:
     from supabase import create_client, Client as SupabaseClient
     _SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
@@ -21,7 +20,6 @@ try:
 except ImportError:
     sb = None
 
-# ── Session store ─────────────────────────────────────────────────────────────
 sessions: dict[str, TuVanTuyenSinh] = {}
 
 def lay_bot(session_id: str) -> TuVanTuyenSinh:
@@ -43,14 +41,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Auth helper ───────────────────────────────────────────────────────────────
 def get_user_id(authorization: Optional[str] = Header(default=None)) -> str:
-    """
-    Lấy user_id từ Supabase JWT trong header Authorization: Bearer <token>
-    Nếu chưa cấu hình Supabase → fallback về 'anonymous' (dev mode)
-    """
     if not sb or not _SUPABASE_URL:
-        return "anonymous"  # dev mode — không cần auth
+        return "anonymous"
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Chưa đăng nhập.")
     token = authorization.split(" ", 1)[1]
@@ -60,7 +53,6 @@ def get_user_id(authorization: Optional[str] = Header(default=None)) -> str:
     except Exception:
         raise HTTPException(status_code=401, detail="Token không hợp lệ hoặc đã hết hạn.")
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
 class CauHoiRequest(BaseModel):
     cau_hoi: str = ""
     image_base64: Optional[str] = None
@@ -70,34 +62,39 @@ class TraLoiResponse(BaseModel):
     tra_loi: str
     user_id: str
 
-class ResetRequest(BaseModel):
-    pass  # user_id lấy từ token
-
-# ── Serve static ──────────────────────────────────────────────────────────────
-_BASE = os.path.dirname(os.path.abspath(__file__))
+_BASE   = os.path.dirname(os.path.abspath(__file__))
 _static = os.path.join(_BASE, "static")
 if os.path.exists(_static):
     app.mount("/static", StaticFiles(directory=_static), name="static")
 
+# ── Routes HTML — tất cả serve từ domain root (không /static/) ───────────────
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    for p in [os.path.join(_BASE, "static", "login.html"),
-              os.path.join(_BASE, "login.html")]:
-        if os.path.exists(p):
-            return FileResponse(p, media_type="text/html")
-    return {"status": "ok", "message": "Magerok AI 🎓"}
+    """Trang login — Supabase redirect về đây sau OAuth."""
+    return FileResponse(os.path.join(_static, "login.html"), media_type="text/html")
+
+@app.api_route("/login", methods=["GET", "HEAD"])
+def login_page():
+    return FileResponse(os.path.join(_static, "login.html"), media_type="text/html")
+
+@app.api_route("/chat", methods=["GET", "HEAD"])
+def chat_page():
+    """Trang chat chính — Supabase redirect về đây sau đăng nhập thành công."""
+    return FileResponse(os.path.join(_static, "index.html"), media_type="text/html")
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
 
 # ── Chat endpoints ────────────────────────────────────────────────────────────
+
 @app.post("/hoi", response_model=TraLoiResponse)
 def hoi(body: CauHoiRequest, user_id: str = Depends(get_user_id)):
     if not body.cau_hoi.strip() and not body.image_base64:
         raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
     try:
-        bot = lay_bot(user_id)  # mỗi user có bot riêng
+        bot = lay_bot(user_id)
         if body.image_base64:
             tra_loi = bot.hoi_voi_anh(
                 cau_hoi=body.cau_hoi or "(Xem ảnh đính kèm)",
