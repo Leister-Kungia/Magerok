@@ -97,6 +97,203 @@ WEBSITES_TO_CRAWL = [
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PHẦN 1B — TỔ HỢP MÔN CHUẨN (bảng cứng, không để AI tự đoán)
+#
+# Nguồn: Quy chế tuyển sinh Bộ GD&ĐT. Cập nhật khi Bộ thay đổi.
+# ══════════════════════════════════════════════════════════════════════════════
+
+TO_HOP_TABLE: dict[str, list[str]] = {
+    # Khối A
+    "A00": ["Toán", "Vật lý", "Hóa học"],
+    "A01": ["Toán", "Vật lý", "Tiếng Anh"],
+    "A02": ["Toán", "Vật lý", "Sinh học"],
+    "A05": ["Toán", "Hóa học", "Tiếng Anh"],
+    "A06": ["Toán", "Vật lý", "Địa lý"],
+    "A07": ["Toán", "Lịch sử", "Địa lý"],
+    "A08": ["Toán", "Hóa học", "Sinh học"],
+    "A09": ["Toán", "Địa lý", "Tiếng Anh"],
+    "A10": ["Toán", "Vật lý", "Tin học"],
+    "A14": ["Toán", "Tiếng Anh", "Tin học"],
+    "A16": ["Toán", "Vật lý", "GDCD"],
+    # Khối B
+    "B00": ["Toán", "Hóa học", "Sinh học"],
+    "B01": ["Toán", "Sinh học", "Tiếng Anh"],
+    "B03": ["Toán", "Sinh học", "Lịch sử"],
+    "B04": ["Toán", "Sinh học", "Địa lý"],
+    "B08": ["Toán", "Sinh học", "GDCD"],
+    # Khối C
+    "C00": ["Ngữ văn", "Lịch sử", "Địa lý"],
+    "C01": ["Ngữ văn", "Toán", "Vật lý"],
+    "C02": ["Ngữ văn", "Toán", "Hóa học"],
+    "C03": ["Ngữ văn", "Toán", "Lịch sử"],
+    "C04": ["Ngữ văn", "Toán", "Địa lý"],
+    "C05": ["Ngữ văn", "Vật lý", "Hóa học"],
+    "C06": ["Ngữ văn", "Vật lý", "Sinh học"],
+    "C07": ["Ngữ văn", "Hóa học", "Sinh học"],
+    "C08": ["Ngữ văn", "Lịch sử", "GDCD"],
+    "C14": ["Toán", "Ngữ văn", "GDCD"],
+    "C19": ["Ngữ văn", "Lịch sử", "Tiếng Anh"],
+    "C20": ["Ngữ văn", "Địa lý", "GDCD"],
+    # Khối D
+    "D01": ["Ngữ văn", "Toán", "Tiếng Anh"],
+    "D02": ["Ngữ văn", "Toán", "Tiếng Nga"],
+    "D03": ["Ngữ văn", "Toán", "Tiếng Pháp"],
+    "D04": ["Ngữ văn", "Toán", "Tiếng Trung"],
+    "D07": ["Toán", "Hóa học", "Tiếng Anh"],
+    "D08": ["Toán", "Sinh học", "Tiếng Anh"],
+    "D09": ["Toán", "Lịch sử", "Tiếng Anh"],
+    "D10": ["Toán", "Địa lý", "Tiếng Anh"],
+    "D14": ["Ngữ văn", "Lịch sử", "Tiếng Anh"],
+    "D15": ["Ngữ văn", "Địa lý", "Tiếng Anh"],
+    # Năng khiếu / Thể thao (tham khảo)
+    "H00": ["Ngữ văn", "Năng khiếu 1", "Năng khiếu 2"],
+    "T00": ["Toán", "Thể dục", "Năng khiếu"],
+}
+
+# Lookup ngược: từ danh sách môn → mã tổ hợp
+_MON_ALIAS: dict[str, str] = {
+    "toan": "Toán", "vat ly": "Vật lý", "ly": "Vật lý", "vật lý": "Vật lý",
+    "hoa hoc": "Hóa học", "hoa": "Hóa học", "hóa": "Hóa học", "hóa học": "Hóa học",
+    "sinh hoc": "Sinh học", "sinh": "Sinh học", "sinh học": "Sinh học",
+    "ngu van": "Ngữ văn", "van": "Ngữ văn", "ngữ văn": "Ngữ văn",
+    "lich su": "Lịch sử", "su": "Lịch sử", "lịch sử": "Lịch sử",
+    "dia ly": "Địa lý", "dia": "Địa lý", "địa lý": "Địa lý",
+    "tieng anh": "Tiếng Anh", "anh": "Tiếng Anh", "tiếng anh": "Tiếng Anh",
+    "tin hoc": "Tin học", "tin": "Tin học", "tin học": "Tin học",
+    "gdcd": "GDCD", "cong dan": "GDCD", "công dân": "GDCD",
+    "tieng trung": "Tiếng Trung", "trung": "Tiếng Trung",
+    "tieng phap": "Tiếng Pháp", "phap": "Tiếng Pháp",
+    "tieng nga": "Tiếng Nga", "nga": "Tiếng Nga",
+}
+
+def tra_to_hop(ma_to_hop: str) -> str | None:
+    """Tra cứu tổ hợp từ mã (vd: 'A01') → 'A01: Toán, Vật lý, Tiếng Anh'."""
+    ma = ma_to_hop.strip().upper()
+    if ma in TO_HOP_TABLE:
+        mon = ", ".join(TO_HOP_TABLE[ma])
+        return f"{ma}: {mon}"
+    return None
+
+def tim_ma_to_hop(cac_mon: list[str]) -> list[str]:
+    """Từ danh sách môn học → tìm mã tổ hợp khớp hoàn toàn."""
+    # Chuẩn hóa tên môn
+    chuan = []
+    for m in cac_mon:
+        m_lower = m.strip().lower()
+        chuan.append(_MON_ALIAS.get(m_lower, m.strip()))
+    chuan_set = set(chuan)
+    ket_qua = []
+    for ma, mon_list in TO_HOP_TABLE.items():
+        if set(mon_list) == chuan_set:
+            ket_qua.append(f"{ma}: {', '.join(mon_list)}")
+    return ket_qua
+
+def to_hop_context() -> str:
+    """Tạo chuỗi mô tả toàn bộ bảng tổ hợp để inject vào system prompt."""
+    lines = ["BẢNG TỔ HỢP MÔN XÉT TUYỂN ĐẠI HỌC (CHUẨN BỘ GD&ĐT):"]
+    for ma, mon in TO_HOP_TABLE.items():
+        lines.append(f"  {ma}: {', '.join(mon)}")
+    lines.append("")
+    lines.append("LƯU Ý QUAN TRỌNG — CÁC NHẦM LẪN PHỔ BIẾN:")
+    lines.append("  - A01 = Toán, Vật lý, Tiếng ANH (KHÔNG phải Tin học)")
+    lines.append("  - A10 = Toán, Vật lý, Tin học (KHÔNG phải Tiếng Anh)")
+    lines.append("  - Toán + Lý + Tin → A10, KHÔNG phải A01")
+    lines.append("  - B00 = Toán, Hóa, Sinh (KHÔNG có Vật lý)")
+    lines.append("  - D01 = Ngữ văn, Toán, Tiếng Anh (KHÔNG phải Toán, Lý, Anh)")
+    lines.append("  - C00 = Ngữ văn, Lịch sử, Địa lý (KHÔNG có Tiếng Anh)")
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHẦN 1C — WEB SEARCH (tra mạng thực sự khi cần thông tin mới nhất)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_WEB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; MagerokBot/1.0; +https://magerok.com)",
+    "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+}
+
+_TUYEN_SINH_SITES = [
+    "tuyensinh247.com",
+    "diemthi.24h.com.vn",
+    "tuyensinh.vn",
+]
+
+def _google_search_urls(query: str, num: int = 5) -> list[str]:
+    """
+    Gọi DuckDuckGo HTML search (không cần API key) → trả về list URL.
+    Ưu tiên các site tuyển sinh uy tín.
+    """
+    site_filter = " OR ".join(f"site:{s}" for s in _TUYEN_SINH_SITES)
+    full_query  = f"{query} ({site_filter})"
+    try:
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": full_query, "kl": "vn-vi"},
+            headers=_WEB_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        urls = []
+        for a in soup.select("a.result__url"):
+            href = a.get("href", "")
+            if href.startswith("http") and len(urls) < num:
+                urls.append(href)
+        # fallback: lấy tất cả link kết quả
+        if not urls:
+            for a in soup.select(".result__title a"):
+                href = a.get("href", "")
+                if "duckduckgo.com" not in href and href.startswith("http"):
+                    urls.append(href)
+                if len(urls) >= num:
+                    break
+        return urls
+    except Exception as e:
+        log.warning(f"[WebSearch] DuckDuckGo lỗi: {e}")
+        return []
+
+def _fetch_page_text(url: str, max_chars: int = 3000) -> str:
+    """Tải một trang web và trích xuất văn bản sạch."""
+    try:
+        resp = requests.get(url, headers=_WEB_HEADERS, timeout=10)
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding or "utf-8"
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # Xoá nav/footer/script/style
+        for tag in soup(["script", "style", "nav", "footer", "header",
+                         "aside", "form", "iframe", "ads"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        # Gộp dòng trống
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        return "\n".join(lines)[:max_chars]
+    except Exception as e:
+        log.warning(f"[WebFetch] {url} → {e}")
+        return ""
+
+def tim_kiem_web(query: str, n_trang: int = 3) -> str:
+    """
+    Tìm kiếm DuckDuckGo → tải nội dung trang → trả về chuỗi tổng hợp.
+    Dùng khi ChromaDB không có dữ liệu hoặc câu hỏi cần thông tin mới nhất.
+    """
+    log.info(f"[WebSearch] Truy vấn: {query}")
+    urls = _google_search_urls(query, num=n_trang + 2)
+    if not urls:
+        return ""
+    doan_van = []
+    for url in urls[:n_trang]:
+        text = _fetch_page_text(url)
+        if text and len(text) > 200:
+            doan_van.append(f"[Nguồn: {url}]\n{text}")
+        if len(doan_van) >= n_trang:
+            break
+    if not doan_van:
+        return ""
+    return "\n\n===\n\n".join(doan_van)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PHẦN 2 — PROMPTS (kịch bản cho từng AI agent)
 #
 # Mỗi agent có:
@@ -246,25 +443,42 @@ def build_nganh_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
 
 # ── Agent 4: Tổ hợp môn ──────────────────────────────────────────────────────
 
-TO_HOP_SYSTEM = """
+_TO_HOP_SYSTEM_BASE = """
 Bạn là người anh/chị giải thích rõ về tổ hợp môn xét tuyển đại học Việt Nam.
 Xưng "mình", gọi người hỏi là "bạn". Giải thích đơn giản, dễ nhớ. Dùng emoji phù hợp để tạo cảm giác gần gũi.
 
-Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
+Ngày hôm nay: {ngay_hom_nay}.
 
-Nguyên tắc:
-1. Giải thích tổ hợp rõ ràng — ví dụ "A00 gồm Toán, Lý, Hóa" 📚
-2. Liệt kê đầy đủ các tổ hợp có thể dùng để xét tuyển ngành được hỏi
-3. Nếu bạn biết tổ hợp của mình, gợi ý ngành phù hợp 🎯
-4. Nhắc kiểm tra lại đề án tuyển sinh từng trường vì có thể khác nhau
-5. Hỏi thêm nếu chưa biết tổ hợp của bạn để tư vấn trúng hơn
+== BẢNG TỔ HỢP CHUẨN (BỘ GD&ĐT) — PHẢI DÙNG CHÍNH XÁC, KHÔNG TỰ SUY DIỄN ==
 
-Trả lời bằng tiếng Việt. Chính xác, dễ hiểu. Dùng emoji tự nhiên (không lạm dụng).
+{bang_to_hop}
+
+== NGUYÊN TẮC BẮT BUỘC ==
+1. CHỈ dùng thông tin trong bảng trên — KHÔNG bịa, KHÔNG đoán, KHÔNG suy diễn
+2. Nếu user hỏi mã tổ hợp → tra bảng → trả lời chính xác 3 môn
+3. Nếu user kể 3 môn → tra bảng ngược → cho biết mã tổ hợp
+4. Nếu không tìm thấy trong bảng → nói thẳng "tổ hợp này không có trong danh mục chuẩn"
+5. TUYỆT ĐỐI KHÔNG nói "A01 gồm Toán, Lý, Tin" — A01 là Toán, Vật lý, TIẾNG ANH
+6. TUYỆT ĐỐI KHÔNG nói "A10 gồm Toán, Lý, Anh" — A10 là Toán, Vật lý, TIN HỌC
+7. Nhắc user kiểm tra đề án tuyển sinh từng trường vì tổ hợp xét tuyển có thể khác nhau 📋
+8. Cuối câu trả lời hỏi thêm nếu cần
+
+Trả lời bằng tiếng Việt. Chính xác tuyệt đối. Dùng emoji tự nhiên.
 """
+
+def _build_to_hop_system() -> str:
+    """Tạo system prompt với bảng tổ hợp cứng được inject vào."""
+    return _TO_HOP_SYSTEM_BASE.replace("{bang_to_hop}", to_hop_context())
+
+# TO_HOP_SYSTEM được resolve lúc runtime (sau khi to_hop_context() sẵn sàng)
+TO_HOP_SYSTEM = _build_to_hop_system()
 
 def build_to_hop_prompt(du_lieu: str, cau_hoi: str, lich_su: str = "") -> str:
     prompt = f"Lịch sử trò chuyện:\n{lich_su}\n\n" if lich_su else ""
-    prompt += f"Thông tin tổ hợp liên quan:\n---\n{du_lieu}\n---\n\nCâu hỏi: {cau_hoi}"
+    # du_lieu từ ChromaDB / web search — bổ sung thêm ngoài bảng cứng đã có trong system
+    if du_lieu and du_lieu != "Không có dữ liệu liên quan trong hệ thống.":
+        prompt += f"Thông tin bổ sung từ cơ sở dữ liệu:\n---\n{du_lieu}\n---\n\n"
+    prompt += f"Câu hỏi: {cau_hoi}"
     return prompt
 
 
@@ -744,7 +958,7 @@ class TuVanTuyenSinh:
         - Câu trả lời thật sự
         - Câu hỏi ngược lại để làm rõ thêm (nếu thông tin chưa đủ)
         """
-        log.info(f"[Câu hỏi] {cau_hoi}")
+        print(f"\n[Câu hỏi] {cau_hoi}")
 
         # Bước 1: Orchestrator xác định agent và có cần hỏi thêm không
         agents, can_hoi_them = self._phan_loai(cau_hoi)
@@ -756,7 +970,7 @@ class TuVanTuyenSinh:
             # Kiểm tra lịch sử — nếu đã có info trong context thì bỏ qua, cứ trả lời
             lich_su_dai = len(self.lich_su) >= 4
             if not lich_su_dai:
-                log.info(f"[Hỏi thêm] {can_hoi_them}")
+                print(f"[Hỏi thêm] {can_hoi_them}")
                 # Lưu câu hỏi gốc vào lịch sử để lần sau dùng làm context
                 self.lich_su.append({"role": "user", "content": cau_hoi})
                 self.lich_su.append({"role": "assistant", "content": can_hoi_them})
@@ -867,7 +1081,39 @@ class TuVanTuyenSinh:
                 query_embeddings=[query_vec], n_results=TOP_K_RESULTS)
 
         docs = results.get("documents", [[]])[0]
-        return "\n---\n".join(docs) if docs else "Không có dữ liệu liên quan trong hệ thống."
+        return "\n---\n".join(docs) if docs else ""
+
+    _KHONG_CO_DU_LIEU = "Không có dữ liệu liên quan trong hệ thống."
+
+    # Agent nào nên tra web khi ChromaDB không đủ
+    _CAN_WEB_SEARCH = {"diem_chuan", "truong", "nganh", "to_hop"}
+
+    def _tim_du_lieu_voi_web(self, ten_agent: str, cau_hoi: str, loai_filter: str | None) -> str:
+        """
+        1. Tra ChromaDB trước.
+        2. Nếu thiếu dữ liệu VÀ agent thuộc nhóm cần tra mạng → gọi tim_kiem_web().
+        3. Ghép cả hai nguồn lại.
+        """
+        du_lieu_local = self._tim_du_lieu(cau_hoi, loai_filter)
+
+        # Với agent to_hop: bảng cứng đã có trong system prompt, không cần web
+        if ten_agent == "to_hop":
+            return du_lieu_local or self._KHONG_CO_DU_LIEU
+
+        # Các agent khác: tra web nếu ChromaDB trống hoặc quá ngắn
+        can_web = (
+            ten_agent in self._CAN_WEB_SEARCH
+            and (not du_lieu_local or len(du_lieu_local) < 300)
+        )
+        if can_web:
+            log.info(f"[WebSearch] ChromaDB thiếu dữ liệu cho '{ten_agent}' → tra mạng")
+            du_lieu_web = tim_kiem_web(cau_hoi, n_trang=3)
+            if du_lieu_web:
+                if du_lieu_local:
+                    return f"{du_lieu_local}\n\n--- Dữ liệu bổ sung từ web ---\n{du_lieu_web}"
+                return f"[Dữ liệu từ web]\n{du_lieu_web}"
+
+        return du_lieu_local or self._KHONG_CO_DU_LIEU
 
     def _chay_agent(self, ten_agent: str, cau_hoi: str) -> str:
         """Chạy một specialist agent: tìm dữ liệu → ghép prompt → gọi LLM."""
@@ -881,7 +1127,7 @@ class TuVanTuyenSinh:
             "kien_thuc":    (KIEN_THUC_SYSTEM,     build_kien_thuc_prompt,    None),
         }
         system_prompt, build_fn, loai_filter = cau_hinh[ten_agent]
-        du_lieu = self._tim_du_lieu(cau_hoi, loai_filter)
+        du_lieu = self._tim_du_lieu_voi_web(ten_agent, cau_hoi, loai_filter)
 
         lich_su_text = ""
         for msg in self.lich_su[-6:]:
