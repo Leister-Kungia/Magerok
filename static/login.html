@@ -325,7 +325,7 @@
   // Redirect nếu đã login
   sb.auth.getSession().then(({ data }) => {
     if (data.session) {
-      window.location.href = '/static/index.html';
+      window.location.href = '/chat';
     }
   });
 
@@ -385,7 +385,7 @@
       if (currentTab === 'login') {
         const { error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        window.location.href = '/static/index.html';
+        window.location.href = '/chat';
       } else {
         const { error } = await sb.auth.signUp({
           email, password,
@@ -410,7 +410,7 @@
   async function loginGoogle() {
     await sb.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin + '/static/index.html' }
+      options: { redirectTo: window.location.origin + '/chat' }
     });
   }
 
