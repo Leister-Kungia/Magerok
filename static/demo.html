@@ -1386,15 +1386,10 @@
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
-              <span style="font-size:0.82rem;color:var(--muted)" id="user-display-name"></span>
-              <button onclick="window.location.href='/login'" title="Đăng xuất"
-                style="background:transparent;border:1.5px solid var(--line);border-radius:8px;
-                       padding:6px 12px;font-size:0.8rem;color:var(--muted);cursor:pointer;
-                       font-family:inherit;transition:all 0.2s"
-                onmouseover="this.style.borderColor='var(--teal)';this.style.color='var(--teal-dark)'"
-                onmouseout="this.style.borderColor='var(--line)';this.style.color='var(--muted)'">
-                Đăng xuất
-              </button>
+              <a href="/login" style="padding:6px 16px;background:var(--teal);color:#fff;
+                border-radius:8px;font-size:0.8rem;font-weight:600;text-decoration:none;
+                transition:opacity .2s" onmouseover="this.style.opacity='.85'"
+                onmouseout="this.style.opacity='1'">Đăng nhập</a>
             </div>
             <div id="fileIndicator" style="display:none;" class="file-badge">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
@@ -1535,40 +1530,81 @@
       <div class="contact-cta">
         <div class="contact-grid">
           <div>
-            <div class="badge" style="background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.16);color:white;">Sẵn để gắn AI vào ngay</div>
-            <h2>Bây giờ bạn chỉ cần đưa "con AI" của bạn vào Magerok.</h2>
-            <p>
-              Landing page này đã có sẵn logo, tone màu, cấu trúc UX, khung chat AI đầy đủ, form thu lead, FAQ và toàn bộ phần trình bày thương hiệu. Bạn có thể dùng file này như bản MVP để triển khai nhanh.
-            </p>
+            <div class="badge" style="background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.16);color:white;">Hỗ trợ tư vấn</div>
+            <h2>Bạn cần thêm sự trợ giúp? Hãy liên hệ với chúng tôi!</h2>
+            <p>Điền thông tin bên cạnh, chúng tôi sẽ phản hồi qua email sớm nhất có thể để hỗ trợ bạn chọn ngành, trường và lộ trình tuyển sinh phù hợp nhất.</p>
             <div class="feature-list">
-              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>Khung chat với lịch sử, streaming, markdown, upload file</div></div>
-              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>Kết nối form với API backend của bạn</div></div>
-              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>Dùng tiếp làm base cho nhiều trang con</div></div>
+              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>Tư vấn chọn ngành theo sở thích và năng lực</div></div>
+              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>So sánh trường và cơ hội việc làm sau tốt nghiệp</div></div>
+              <div class="feature-item" style="color:rgba(255,255,255,0.84)"><span class="dot" style="background:white"></span><div>Hỗ trợ lập lộ trình nộp hồ sơ và tìm học bổng</div></div>
             </div>
           </div>
 
-          <form class="form" onsubmit="event.preventDefault(); alert('Đây là form demo. Bạn có thể nối nó với CRM, email hoặc backend AI của mình.');">
+          <form class="form" id="contact-form" onsubmit="submitContact(event)">
             <div class="field-row">
-              <input type="text" placeholder="Họ và tên" />
-              <input type="email" placeholder="Email" />
+              <input type="text" id="cf-name" placeholder="Họ và tên" required />
+              <input type="email" id="cf-email" placeholder="Email của bạn" required />
             </div>
             <div class="field-row">
-              <select>
-                <option>Mối quan tâm</option>
-                <option>Chọn ngành</option>
-                <option>Chọn trường</option>
+              <select id="cf-topic">
+                <option value="">Bạn cần hỗ trợ về?</option>
+                <option>Chọn ngành học</option>
+                <option>Chọn trường đại học</option>
                 <option>Học bổng</option>
                 <option>Review hồ sơ</option>
+                <option>Lộ trình ôn thi</option>
+                <option>Khác</option>
               </select>
-              <input type="text" placeholder="Số điện thoại" />
+              <input type="text" id="cf-phone" placeholder="Số điện thoại (tuỳ chọn)" />
             </div>
-            <textarea placeholder="Mô tả ngắn nhu cầu tuyển sinh của bạn"></textarea>
-            <button class="btn btn-primary" type="submit">Nhận tư vấn</button>
-            <span class="tiny" style="color:rgba(255,255,255,0.74)">Bạn có thể thay form này bằng lịch hẹn, CRM form, webhook hoặc luồng chat AI.</span>
+            <textarea id="cf-msg" placeholder="Mô tả nhu cầu của bạn..." rows="4" required></textarea>
+            <button class="btn btn-primary" type="submit" id="cf-btn">Gửi liên hệ</button>
+            <span class="tiny" style="color:rgba(255,255,255,0.74)" id="cf-status"></span>
           </form>
         </div>
       </div>
     </section>
+
+    <script>
+    async function submitContact(e) {
+      e.preventDefault();
+      const btn    = document.getElementById('cf-btn');
+      const status = document.getElementById('cf-status');
+      const name   = document.getElementById('cf-name').value.trim();
+      const email  = document.getElementById('cf-email').value.trim();
+      const phone  = document.getElementById('cf-phone').value.trim();
+      const topic  = document.getElementById('cf-topic').value;
+      const msg    = document.getElementById('cf-msg').value.trim();
+
+      btn.disabled = true;
+      btn.textContent = 'Đang gửi...';
+      status.textContent = '';
+
+      try {
+        // Dùng Formspree để gửi email về maltykun@gmail.com
+        const res = await fetch('https://formspree.io/f/mjgzbpag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ name, email, phone, topic, message: msg,
+            _subject: `[Magerok] Liên hệ từ ${name} — ${topic || 'Chung'}` })
+        });
+
+        if (res.ok) {
+          status.style.color = '#68d391';
+          status.textContent = '✅ Đã gửi thành công! Chúng tôi sẽ phản hồi sớm nhất có thể.';
+          document.getElementById('contact-form').reset();
+        } else {
+          throw new Error();
+        }
+      } catch {
+        status.style.color = '#fc8181';
+        status.textContent = '❌ Gửi thất bại. Vui lòng thử lại hoặc email trực tiếp: maltykun@gmail.com';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Gửi liên hệ';
+      }
+    }
+    </script>
   <section id="faq" class="container reveal">
       <div class="section-head">
         <div>
