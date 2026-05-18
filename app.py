@@ -155,6 +155,8 @@ def hoi(body: CauHoiRequest, user_id: str = Depends(get_user_id)):
         bot     = lay_bot(user_id)
         ket_qua = _goi_bot(bot, body)
     except Exception as e:
+        import traceback, logging
+        logging.error(f"[/hoi] user={user_id} error={e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
     if sb and history_id:
