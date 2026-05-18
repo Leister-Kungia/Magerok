@@ -312,7 +312,7 @@ body{
 }
 .ai .msg-img{border-color:var(--line)}
 
-/* Typing */
+/* Typing dots */
 .typing-dots{display:flex;gap:4px;padding:4px 2px}
 .typing-dots span{
   width:6px;height:6px;border-radius:50%;background:var(--teal);
@@ -321,6 +321,27 @@ body{
 .typing-dots span:nth-child(2){animation-delay:.2s}
 .typing-dots span:nth-child(3){animation-delay:.4s}
 @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}
+
+/* Progress steps */
+.progress-wrap{display:flex;flex-direction:column;gap:6px;min-width:220px;padding:2px 0;}
+.progress-step{
+  display:flex;align-items:center;gap:8px;
+  font-size:13px;color:var(--muted);
+  animation:fadeSlideIn .3s ease;
+}
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.progress-step .ps-icon{
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;
+  display:grid;place-items:center;font-size:11px;
+}
+.progress-step.active{color:var(--navy);font-weight:600;}
+.progress-step.active .ps-icon{
+  background:rgba(46,196,182,.15);
+  animation:spin-pulse 1s linear infinite;
+}
+@keyframes spin-pulse{0%,100%{box-shadow:0 0 0 0 rgba(46,196,182,.4)}50%{box-shadow:0 0 0 4px rgba(46,196,182,.1)}}
+.progress-step.done{color:#22c55e;}
+.progress-step.done .ps-icon{background:rgba(34,197,94,.12);}
 
 /* Input area */
 .input-area{
@@ -486,13 +507,13 @@ body{
             <polyline points="21 15 16 10 5 21"/>
           </svg>
         </button>
-        <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFile(event)"/>
+        <input type="file" id="file-input" accept="image/*,application/pdf,.doc,.docx,.txt,.csv" multiple style="display:none" onchange="handleFile(event)"/>
         <button class="btn-send" id="btn-send" onclick="sendMessage()">
           <svg width="16" height="16" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
     </div>
-    <div class="input-hint">Enter gửi · Shift+Enter xuống dòng · hỗ trợ ảnh học bạ</div>
+    <div class="input-hint">Enter gửi · Shift+Enter xuống dòng · hỗ trợ ảnh, PDF, Word, CSV</div>
   </div>
 </main>
 
@@ -509,7 +530,7 @@ marked.setOptions({ breaks: true, gfm: true, headerIds: false, mangle: false });
 /* ── State ───────────────────────────────────────────────────────── */
 let currentUser  = null;
 let accessToken  = null;
-let pendingFile  = null;   // { base64, type, name }
+let pendingFiles = [];     // [{base64, media_type, name, dataUrl}]
 let isBusy       = false;
 let conversations = [];    // [{ id, title, messages: [{role,content,imgDataUrl?}], ts }]
 let activeId      = null;
@@ -652,26 +673,42 @@ function deleteConv(e, id) {
   else renderSidebar();
 }
 
-/* ── File upload ─────────────────────────────────────────────────── */
+/* ── File upload (đa file) ───────────────────────────────────────── */
 function handleFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (file.size > 5*1024*1024) { alert('Ảnh tối đa 5MB'); return; }
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const full = ev.target.result;
-    pendingFile = { base64: full.split(',')[1], type: file.type, name: file.name, dataUrl: full };
-    document.getElementById('file-indicator').classList.add('show');
-    document.getElementById('file-name').textContent = file.name;
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  const oversized = files.filter(f => f.size > 10*1024*1024);
+  if (oversized.length) {
+    alert(`File quá lớn (tối đa 10MB mỗi file):\n${oversized.map(f=>f.name).join('\n')}`);
+    return;
+  }
+  const reads = files.map(file => new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      base64:     reader.result.split(',')[1],
+      media_type: file.type || 'application/octet-stream',
+      name:       file.name,
+      dataUrl:    reader.result,
+    });
+    reader.readAsDataURL(file);
+  }));
+  Promise.all(reads).then(results => {
+    pendingFiles = [...pendingFiles, ...results];
+    const ind = document.getElementById('file-indicator');
+    const nm  = document.getElementById('file-name');
+    ind.classList.add('show');
+    nm.textContent = pendingFiles.length === 1
+      ? pendingFiles[0].name
+      : `${pendingFiles.length} file: ${pendingFiles.map(f=>f.name).join(', ')}`;
     document.getElementById('btn-upload').classList.add('has-file');
-  };
-  reader.readAsDataURL(file);
+  });
   e.target.value = '';
 }
 function removeFile() {
-  pendingFile = null;
+  pendingFiles = [];
   document.getElementById('file-indicator').classList.remove('show');
   document.getElementById('btn-upload').classList.remove('has-file');
+  document.getElementById('file-input').value = '';
 }
 
 /* ── Send ────────────────────────────────────────────────────────── */
@@ -691,7 +728,7 @@ async function sendMessage() {
   if (isBusy) return;
   const input = document.getElementById('chat-input');
   const text  = input.value.trim();
-  if (!text && !pendingFile) return;
+  if (!text && !pendingFiles.length) return;
 
   // Remove empty state
   const empty = document.getElementById('empty-state');
@@ -708,19 +745,21 @@ async function sendMessage() {
   const conv = conversations.find(c=>c.id===activeId);
 
   const msgText    = text || '(Xem ảnh đính kèm)';
-  const fileSnap   = pendingFile ? {...pendingFile} : null;
-  const imgDataUrl = fileSnap?.dataUrl || null;
+  const fileSnap   = pendingFiles.length ? [...pendingFiles] : null;
+  const imgDataUrl = fileSnap?.[0]?.dataUrl || null;
 
   input.value=''; input.style.height='auto';
+  pendingFiles = [];
   removeFile();
 
   // Store & render user message
   conv.messages.push({ role:'user', content:msgText, imgDataUrl });
   appendDOM('user', msgText, imgDataUrl, true);
 
-  // Typing
+  // Typing / progress
   const typId = 'typ_'+Date.now();
   appendTyping(typId);
+  updateProgress(typId, 1, '🔐 Xác thực và khởi tạo…');
   scrollBottom();
 
   isBusy = true;
@@ -733,34 +772,74 @@ async function sendMessage() {
     const res = await fetch('/hoi', {
       method:'POST', headers,
       body: JSON.stringify({
-        cau_hoi: msgText,
-        image_base64: fileSnap?.base64 || null,
-        image_type:   fileSnap?.type   || null,
+        cau_hoi:      msgText,
+        files: fileSnap ? fileSnap.map(f=>({base64:f.base64, media_type:f.media_type, name:f.name})) : [],
+        image_base64: null,
+        image_type:   null,
         history_id:   currentHistoryId || null,
       })
     });
 
-    removeTyping(typId);
-
     if (!res.ok) {
+      removeTyping(typId);
       const err = await res.json().catch(()=>({}));
       throw new Error(err.detail||`HTTP ${res.status}`);
     }
 
-    const data = await res.json();
-    const answer = data.tra_loi || '(Không có phản hồi)';
+    // Đọc SSE stream
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   finalData = null;
 
-    // Lưu history_id từ server để dùng cho tin nhắn tiếp theo
-    if (data.history_id && !currentHistoryId) {
-      currentHistoryId = data.history_id;
-      if (conv) conv.id = data.history_id;
-      activeId = data.history_id;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse từng SSE block (phân cách bởi \n\n)
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop(); // phần chưa hoàn chỉnh giữ lại
+
+      for (const block of blocks) {
+        const eventMatch = block.match(/^event:\s*(.+)$/m);
+        const dataMatch  = block.match(/^data:\s*(.+)$/m);
+        if (!eventMatch || !dataMatch) continue;
+
+        const event = eventMatch[1].trim();
+        let   data;
+        try { data = JSON.parse(dataMatch[1]); } catch { continue; }
+
+        if (event === 'progress') {
+          updateProgress(typId, data.step, data.text);
+        } else if (event === 'done') {
+          finalData = data;
+        } else if (event === 'error') {
+          removeTyping(typId);
+          throw new Error(data.detail || 'Lỗi server');
+        }
+      }
+    }
+
+    // Xong — xử lý kết quả
+    updateProgress(typId, 99, '', true); // đánh dấu tất cả done
+    removeTyping(typId);
+
+    if (!finalData) throw new Error('Không nhận được phản hồi từ server');
+
+    const answer = finalData.tra_loi || '(Không có phản hồi)';
+
+    // Lưu history_id
+    if (finalData.history_id && !currentHistoryId) {
+      currentHistoryId = finalData.history_id;
+      if (conv) conv.id = finalData.history_id;
+      activeId = finalData.history_id;
       renderSidebar();
     }
 
-    // Hiển thị ảnh vẽ (nếu có) trước câu trả lời text
-    if (data.anh && data.anh.length > 0) {
-      data.anh.forEach(b64 => {
+    // Hiển thị ảnh vẽ nếu có
+    if (finalData.anh && finalData.anh.length > 0) {
+      finalData.anh.forEach(b64 => {
         const imgRow = document.createElement('div');
         imgRow.className = 'msg-row';
         imgRow.innerHTML = `
@@ -771,7 +850,7 @@ async function sendMessage() {
             </svg>
           </div>
           <div class="msg-bubble ai">
-            <img src="data:image/png;base64,${b64}" class="msg-img ai" alt="Hình minh hoạ" style="max-width:100%;border-radius:10px;margin-bottom:4px;"/>
+            <img src="data:image/png;base64,${b64}" style="max-width:100%;border-radius:10px;margin-bottom:4px;" alt="Hình minh hoạ"/>
           </div>`;
         document.getElementById('messages').appendChild(imgRow);
         scrollBottom();
@@ -884,10 +963,31 @@ function appendTyping(id) {
         <path d="M23 48L17 56L29 53.6L23 48Z" fill="white" opacity="0.92"/>
       </svg>
     </div>
-    <div class="msg-bubble ai"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+    <div class="msg-bubble ai">
+      <div class="progress-wrap" id="${id}-steps"></div>
+    </div>`;
   box.appendChild(row);
   scrollBottom();
 }
+
+function updateProgress(id, step, text, done=false) {
+  const wrap = document.getElementById(id+'-steps');
+  if (!wrap) return;
+  // Đánh dấu step cũ là done
+  wrap.querySelectorAll('.progress-step.active').forEach(el => {
+    el.classList.remove('active');
+    el.classList.add('done');
+    el.querySelector('.ps-icon').textContent = '✓';
+  });
+  if (done) return;
+  // Thêm step mới
+  const div = document.createElement('div');
+  div.className = 'progress-step active';
+  div.innerHTML = `<div class="ps-icon">⟳</div><span>${text}</span>`;
+  wrap.appendChild(div);
+  scrollBottom();
+}
+
 function removeTyping(id) {
   document.getElementById(id)?.remove();
 }
