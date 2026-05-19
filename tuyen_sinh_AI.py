@@ -84,10 +84,10 @@ LLM_MODELS = [
     # ── Production (ổn định, Groq cam kết không khai tử đột ngột) ──
     "llama-3.3-70b-versatile",                   # mạnh nhất, tiếng Việt tốt → dùng trước
     # ── Preview (miễn phí, quota riêng, có thể bị khai tử nhưng dùng được) ──
-    "qwen/qwen3-32b",                            # 32B, mạnh, context 131K
     "meta-llama/llama-4-scout-17b-16e-instruct", # nhanh 750 t/s, cũng dùng cho Vision
     # ── Production nhẹ (fallback cuối) ──
     "llama-3.1-8b-instant",                      # 560 t/s, nhỏ nhưng cực nhanh
+    # Qwen3-32b bị bỏ — thinking mode gây lỗi khi dùng qua Groq SDK
 ]
 LLM_MODEL = LLM_MODELS[0]          # giữ biến này để tương thích code cũ (vision model v.v.)
 
@@ -1434,15 +1434,12 @@ class TuVanTuyenSinh:
         last_error = None
         for model in LLM_MODELS:
             try:
-                # Qwen3 có chế độ "thinking" mặc định — tắt đi để không lộ
-                # chain-of-thought ra ngoài câu trả lời
-                extra = {"thinking": {"type": "disabled"}} if "qwen3" in model else {}
-                resp = self.groq.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    **extra,
-                )
+                # Qwen3 có chế độ "thinking" mặc định — tắt bằng extra_body
+                # (Groq dùng extra_body thay vì param trực tiếp)
+                kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens}
+                if "qwen3" in model:
+                    kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+                resp = self.groq.chat.completions.create(**kwargs)
                 if model != LLM_MODELS[0]:
                     log.info(f"[Fallback] Đang dùng model dự phòng: {model}")
                 return resp.choices[0].message.content.strip()
