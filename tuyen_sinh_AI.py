@@ -81,10 +81,13 @@ GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
 # Danh sách model fallback — thử theo thứ tự, tự động chuyển khi hết quota
 # Tất cả đều miễn phí trên Groq, quota độc lập nhau nên rotate rất hiệu quả
 LLM_MODELS = [
-    "llama-3.3-70b-versatile",      # mạnh nhất, tiếng Việt tốt nhất → dùng trước
-    "llama-3.3-70b-specdec",        # variant của 3.3-70b, quota riêng
-    "gemma2-9b-it",                 # nhẹ hơn, vẫn đủ dùng
-    "llama-3.1-8b-instant",         # nhanh nhất, chỉ dùng khi hết tất cả trên
+    # ── Production (ổn định, Groq cam kết không khai tử đột ngột) ──
+    "llama-3.3-70b-versatile",                   # mạnh nhất, tiếng Việt tốt → dùng trước
+    # ── Preview (miễn phí, quota riêng, có thể bị khai tử nhưng dùng được) ──
+    "qwen/qwen3-32b",                            # 32B, mạnh, context 131K
+    "meta-llama/llama-4-scout-17b-16e-instruct", # nhanh 750 t/s, cũng dùng cho Vision
+    # ── Production nhẹ (fallback cuối) ──
+    "llama-3.1-8b-instant",                      # 560 t/s, nhỏ nhưng cực nhanh
 ]
 LLM_MODEL = LLM_MODELS[0]          # giữ biến này để tương thích code cũ (vision model v.v.)
 
