@@ -651,20 +651,30 @@ Các agent có sẵn:
 - "hoc_tap"     : câu hỏi về cách học, lộ trình học tập, kỹ năng cần có sau khi chọn ngành
 - "kien_thuc"   : câu hỏi muốn học/hiểu một kiến thức cụ thể (lập trình, toán, khoa học...)
 
-Trường "can_hoi_them": câu hỏi ngắn để hỏi thêm thông tin nếu câu hỏi còn mơ hồ.
-- Đặt "" nếu câu hỏi đã đủ thông tin để trả lời
-- Đặt câu hỏi ngắn (1 câu) nếu thiếu thông tin quan trọng, ví dụ:
-  + Chưa biết điểm số → hỏi "Bạn đang có khoảng bao nhiêu điểm và tổ hợp nào vậy?"
-  + Chưa biết sở thích → hỏi "Bạn thích thiên về kỹ thuật, kinh doanh hay sáng tạo?"
-  + Hỏi về ngành nhưng chưa biết trường → hỏi "Bạn muốn học ở khu vực nào, Hà Nội hay TP.HCM?"
+Trường "can_hoi_them": câu hỏi ngắn để hỏi lại nếu câu hỏi mơ hồ hoặc quá ngắn.
+- Đặt "" CHỈ KHI câu hỏi đã đủ thông tin cụ thể để trả lời ngay
+- BẮT BUỘC hỏi lại (can_hoi_them != "") nếu rơi vào một trong các trường hợp:
+  + Câu quá ngắn/mơ hồ, không rõ muốn hỏi gì cụ thể
+    Ví dụ: "Thi đại học.", "Ngành CNTT.", "Tư vấn cho mình với."
+    → Hỏi: "Bạn đang cần tư vấn về điểm chuẩn, chọn trường, chọn ngành, hay cách ôn thi nhỉ?"
+  + Hỏi điểm chuẩn nhưng chưa biết điểm/tổ hợp của học sinh
+    → Hỏi: "Bạn đang có khoảng bao nhiêu điểm và thi tổ hợp nào vậy?"
+  + Hỏi chọn ngành/hướng nghiệp nhưng chưa biết sở thích/thế mạnh
+    → Hỏi: "Bạn thích thiên về kỹ thuật, kinh doanh, hay sáng tạo/nghệ thuật?"
+  + Hỏi về trường nhưng chưa biết khu vực hoặc mức điểm
+    → Hỏi: "Bạn muốn học ở Hà Nội hay TP.HCM? Và đang có khoảng bao nhiêu điểm?"
 
 Quy tắc:
 - Trả về đúng định dạng JSON, không giải thích thêm gì
 - Có thể chọn nhiều agent nếu câu hỏi liên quan nhiều chủ đề
+- Khi hỏi lại, câu hỏi phải ngắn (1 câu), thân thiện, hỏi đúng thứ còn thiếu nhất
 
 Ví dụ:
   Câu hỏi: "Em 25 điểm A00, học CNTT trường nào được?"
   Trả về: {"agents": ["diem_chuan", "truong", "nganh"], "can_hoi_them": ""}
+
+  Câu hỏi: "Thi đại học."
+  Trả về: {"agents": ["huong_nghiep"], "can_hoi_them": "Bạn đang cần tư vấn về điều gì: điểm chuẩn, chọn ngành, chọn trường, hay cách ôn thi nhỉ?"}
 
   Câu hỏi: "Em thích lập trình, nên chọn ngành gì?"
   Trả về: {"agents": ["huong_nghiep", "nganh"], "can_hoi_them": "Bạn đang có khoảng bao nhiêu điểm và học tổ hợp nào nhỉ?"}
@@ -674,6 +684,9 @@ Ví dụ:
 
   Câu hỏi: "Con trỏ trong C++ là gì vậy?"
   Trả về: {"agents": ["kien_thuc"], "can_hoi_them": ""}
+
+  Câu hỏi: "Tư vấn cho mình với."
+  Trả về: {"agents": ["huong_nghiep"], "can_hoi_them": "Bạn đang băn khoăn về điều gì: chọn ngành, chọn trường, điểm chuẩn, hay cách học ôn thi?"}
 """
 
 def build_orchestrator_prompt(cau_hoi: str) -> str:
@@ -691,6 +704,8 @@ Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về th
 Bạn sẽ được cung cấp dữ liệu điểm chuẩn thực tế. Dựa vào đó để tư vấn.
 
 Nguyên tắc:
+0. NẾU câu hỏi chưa có điểm số hoặc chưa rõ trường/ngành cụ thể →
+   HỎI LẠI ngay, đừng tự suy đoán. Ví dụ: "Bạn đang có bao nhiêu điểm và thi tổ hợp nào nhỉ?"
 1. Luôn dùng số liệu cụ thể từ dữ liệu được cung cấp 📊
 2. So sánh điểm học sinh với điểm chuẩn — cao hơn thì nói "an toàn" ✅,
    thấp hơn thì gợi ý phương án dự phòng cụ thể
@@ -753,9 +768,11 @@ Xưng "mình", gọi người hỏi là "bạn". Tự nhiên như đang nói chu
 Ngày hôm nay: {ngay_hom_nay}. Dùng thông tin này khi được hỏi về thời gian hiện tại hoặc năm hiện tại.
 
 Nguyên tắc:
+0. NẾU câu hỏi chưa nêu rõ ngành/lĩnh vực cụ thể → HỎI LẠI ngay thay vì tự đoán.
+   Ví dụ: "Bạn đang quan tâm đến ngành nào, hay muốn mình gợi ý theo sở thích?"
 1. Giải thích theo ngôn ngữ dễ hiểu — không dùng từ kỹ thuật mà không giải thích 💡
 2. Nêu cụ thể: học những môn gì, ra trường làm ở đâu, mức lương thực tế 💼
-3. Trả lời thẳng vào câu hỏi
+3. Trả lời thẳng vào câu hỏi — không liệt kê dài dòng nếu không được hỏi
 4. Nếu phù hợp, gợi ý thêm 1-2 ngành liên quan để bạn cân nhắc thêm 🔍
 5. Cuối trả lời, hỏi thêm 1 câu để hiểu bạn hơn (ví dụ: bạn thiên về lý thuyết hay thực hành?)
 
@@ -996,6 +1013,8 @@ Nguyên tắc:
 3. Độ dài vừa phải — đủ để trả lời, không dài dòng
 4. Kết thúc bằng 1 câu hỏi gợi mở ngắn, tự nhiên nếu bạn cần tư vấn thêm
 5. Nếu nhiều agent đề xuất hỏi thêm, chỉ hỏi 1 câu thôi — câu quan trọng nhất
+6. NẾU các agent đều đang hỏi lại vì thiếu thông tin → chỉ hỏi lại,
+   KHÔNG tự suy đoán rồi trả lời dài. Ngắn gọn, đúng trọng tâm.
 
 Trả lời bằng tiếng Việt. Thân thiện, tự nhiên, có emoji.
 """
@@ -1415,10 +1434,14 @@ class TuVanTuyenSinh:
         last_error = None
         for model in LLM_MODELS:
             try:
+                # Qwen3 có chế độ "thinking" mặc định — tắt đi để không lộ
+                # chain-of-thought ra ngoài câu trả lời
+                extra = {"thinking": {"type": "disabled"}} if "qwen3" in model else {}
                 resp = self.groq.chat.completions.create(
                     model=model,
                     messages=messages,
                     max_tokens=max_tokens,
+                    **extra,
                 )
                 if model != LLM_MODELS[0]:
                     log.info(f"[Fallback] Đang dùng model dự phòng: {model}")
