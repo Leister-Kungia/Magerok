@@ -82,8 +82,7 @@ GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
 # Tất cả đều miễn phí trên Groq, quota độc lập nhau nên rotate rất hiệu quả
 LLM_MODELS = [
     "llama-3.3-70b-versatile",      # mạnh nhất, tiếng Việt tốt nhất → dùng trước
-    "llama-3.1-70b-versatile",      # tương đương, quota riêng
-    "mixtral-8x7b-32768",           # context dài, ổn định
+    "llama-3.3-70b-specdec",        # variant của 3.3-70b, quota riêng
     "gemma2-9b-it",                 # nhẹ hơn, vẫn đủ dùng
     "llama-3.1-8b-instant",         # nhanh nhất, chỉ dùng khi hết tất cả trên
 ]
@@ -1426,7 +1425,8 @@ class TuVanTuyenSinh:
                 # Chỉ fallback khi lỗi quota/rate-limit, còn lỗi khác thì raise luôn
                 if any(k in err_str for k in ["rate_limit", "rate limit", "429",
                                                "quota", "capacity", "overloaded",
-                                               "tokens per", "requests per"]):
+                                               "tokens per", "requests per",
+                                               "decommissioned", "no longer supported"]):
                     log.warning(f"[Fallback] {model} hết quota → thử model tiếp: {e}")
                     last_error = e
                     time.sleep(0.5)   # nghỉ nhẹ trước khi thử model kế
