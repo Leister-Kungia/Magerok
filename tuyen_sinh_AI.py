@@ -41,8 +41,10 @@ import json
 import time
 import base64
 import io
+import ast
 import logging
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
 
 # Thư viện bên ngoài — cài bằng: pip install -r requirements.txt
 import chromadb
@@ -80,16 +82,33 @@ GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")   # lấy tại console.groq.com
 
 # Danh sách model fallback — thử theo thứ tự, tự động chuyển khi hết quota
 # Tất cả đều miễn phí trên Groq, quota độc lập nhau nên rotate rất hiệu quả
+#
+# ⚠ Groq khai tử model khá thường xuyên (cả model Production lẫn Preview).
+#   Kiểm tra định kỳ: https://console.groq.com/docs/deprecations
+#   Đã cập nhật 10/2026 — các model cũ sau đều đã TẮT:
+#     llama-3.3-70b-versatile, llama-3.1-8b-instant (16/08/2026),
+#     meta-llama/llama-4-scout-17b-16e-instruct, qwen/qwen3-32b (17/07/2026)
 LLM_MODELS = [
-    # ── Production (ổn định, Groq cam kết không khai tử đột ngột) ──
-    "llama-3.3-70b-versatile",                   # mạnh nhất, tiếng Việt tốt → dùng trước
-    # ── Preview (miễn phí, quota riêng, có thể bị khai tử nhưng dùng được) ──
-    "meta-llama/llama-4-scout-17b-16e-instruct", # nhanh 750 t/s, cũng dùng cho Vision
-    # ── Production nhẹ (fallback cuối) ──
-    "llama-3.1-8b-instant",                      # 560 t/s, nhỏ nhưng cực nhanh
-    # Qwen3-32b bị bỏ — thinking mode gây lỗi khi dùng qua Groq SDK
+    "openai/gpt-oss-120b",   # mạnh nhất → dùng trước (thay llama-3.3-70b-versatile)
+    "openai/gpt-oss-20b",    # nhanh, nhẹ (thay llama-3.1-8b-instant)
+    "qwen/qwen3.8-27b",      # fallback cuối — chạy instruct mode (reasoning_effort="none")
 ]
-LLM_MODEL = LLM_MODELS[0]          # giữ biến này để tương thích code cũ (vision model v.v.)
+# Model đọc ảnh (Vision) — Qwen3.8 27B là model đa phương thức (chữ + ảnh)
+VISION_MODEL = "qwen/qwen3.8-27b"
+LLM_MODEL = LLM_MODELS[0]          # giữ biến này để tương thích code cũ
+
+
+def _reasoning_extra(model: str) -> dict:
+    """
+    Tham số reasoning riêng của từng họ model trên Groq (gửi qua extra_body).
+      - gpt-oss : luôn có suy luận, chỉ nhận low / medium / high  → dùng "low" cho nhanh
+      - qwen3.x : "none" = instruct mode, trả lời thẳng, không "nghĩ" dài
+    """
+    if "gpt-oss" in model:
+        return {"reasoning_effort": "low"}
+    if "qwen3" in model:
+        return {"reasoning_effort": "none"}
+    return {}
 
 # EMBEDDING_MODEL không dùng — embedding chạy local qua ChromaDB DefaultEmbeddingFunction (ONNX)
 
@@ -131,6 +150,9 @@ WEBSITES_TO_CRAWL = [
 # PHẦN 1B — TỔ HỢP MÔN CHUẨN (bảng cứng, không để AI tự đoán)
 #
 # Nguồn: Quy chế tuyển sinh Bộ GD&ĐT. Cập nhật khi Bộ thay đổi.
+# (Đã đối chiếu lại toàn bộ khối A/B/C với danh mục chuẩn — 10/2026.
+#  "GDCD" ở đây = môn Giáo dục công dân (chương trình cũ); từ 2025 môn này gọi là
+#  "Giáo dục kinh tế và pháp luật" và có mã tổ hợp riêng, vd X05.)
 # ══════════════════════════════════════════════════════════════════════════════
 
 TO_HOP_TABLE: dict[str, list[str]] = {
@@ -138,20 +160,29 @@ TO_HOP_TABLE: dict[str, list[str]] = {
     "A00": ["Toán", "Vật lý", "Hóa học"],
     "A01": ["Toán", "Vật lý", "Tiếng Anh"],
     "A02": ["Toán", "Vật lý", "Sinh học"],
-    "A05": ["Toán", "Hóa học", "Tiếng Anh"],
-    "A06": ["Toán", "Vật lý", "Địa lý"],
+    "A03": ["Toán", "Vật lý", "Lịch sử"],
+    "A04": ["Toán", "Vật lý", "Địa lý"],
+    "A05": ["Toán", "Hóa học", "Lịch sử"],
+    "A06": ["Toán", "Hóa học", "Địa lý"],
     "A07": ["Toán", "Lịch sử", "Địa lý"],
-    "A08": ["Toán", "Hóa học", "Sinh học"],
-    "A09": ["Toán", "Địa lý", "Tiếng Anh"],
-    "A10": ["Toán", "Vật lý", "Tin học"],
-    "A14": ["Toán", "Tiếng Anh", "Tin học"],
-    "A16": ["Toán", "Vật lý", "GDCD"],
+    "A08": ["Toán", "Lịch sử", "GDCD"],
+    "A09": ["Toán", "Địa lý", "GDCD"],
+    "A10": ["Toán", "Vật lý", "GDCD"],
+    "A11": ["Toán", "Hóa học", "GDCD"],
+    "A12": ["Toán", "Khoa học tự nhiên", "Khoa học xã hội"],
+    "A14": ["Toán", "Khoa học tự nhiên", "Địa lý"],
+    "A15": ["Toán", "Khoa học tự nhiên", "GDCD"],
+    "A16": ["Toán", "Khoa học tự nhiên", "Ngữ văn"],
+    "A17": ["Toán", "Vật lý", "Khoa học xã hội"],
+    "A18": ["Toán", "Hóa học", "Khoa học xã hội"],
     # Khối B
     "B00": ["Toán", "Hóa học", "Sinh học"],
-    "B01": ["Toán", "Sinh học", "Tiếng Anh"],
-    "B03": ["Toán", "Sinh học", "Lịch sử"],
-    "B04": ["Toán", "Sinh học", "Địa lý"],
-    "B08": ["Toán", "Sinh học", "GDCD"],
+    "B01": ["Toán", "Sinh học", "Lịch sử"],
+    "B02": ["Toán", "Sinh học", "Địa lý"],
+    "B03": ["Toán", "Sinh học", "Ngữ văn"],
+    "B04": ["Toán", "Sinh học", "GDCD"],
+    "B05": ["Toán", "Sinh học", "Khoa học xã hội"],
+    "B08": ["Toán", "Sinh học", "Tiếng Anh"],
     # Khối C
     "C00": ["Ngữ văn", "Lịch sử", "Địa lý"],
     "C01": ["Ngữ văn", "Toán", "Vật lý"],
@@ -160,10 +191,17 @@ TO_HOP_TABLE: dict[str, list[str]] = {
     "C04": ["Ngữ văn", "Toán", "Địa lý"],
     "C05": ["Ngữ văn", "Vật lý", "Hóa học"],
     "C06": ["Ngữ văn", "Vật lý", "Sinh học"],
-    "C07": ["Ngữ văn", "Hóa học", "Sinh học"],
-    "C08": ["Ngữ văn", "Lịch sử", "GDCD"],
-    "C14": ["Toán", "Ngữ văn", "GDCD"],
-    "C19": ["Ngữ văn", "Lịch sử", "Tiếng Anh"],
+    "C07": ["Ngữ văn", "Vật lý", "Lịch sử"],
+    "C08": ["Ngữ văn", "Hóa học", "Sinh học"],
+    "C09": ["Ngữ văn", "Vật lý", "Địa lý"],
+    "C10": ["Ngữ văn", "Hóa học", "Lịch sử"],
+    "C12": ["Ngữ văn", "Sinh học", "Lịch sử"],
+    "C13": ["Ngữ văn", "Sinh học", "Địa lý"],
+    "C14": ["Ngữ văn", "Toán", "GDCD"],
+    "C15": ["Ngữ văn", "Toán", "Khoa học xã hội"],
+    "C16": ["Ngữ văn", "Vật lý", "GDCD"],
+    "C17": ["Ngữ văn", "Hóa học", "GDCD"],
+    "C19": ["Ngữ văn", "Lịch sử", "GDCD"],
     "C20": ["Ngữ văn", "Địa lý", "GDCD"],
     # Khối D
     "D01": ["Ngữ văn", "Toán", "Tiếng Anh"],
@@ -176,9 +214,16 @@ TO_HOP_TABLE: dict[str, list[str]] = {
     "D10": ["Toán", "Địa lý", "Tiếng Anh"],
     "D14": ["Ngữ văn", "Lịch sử", "Tiếng Anh"],
     "D15": ["Ngữ văn", "Địa lý", "Tiếng Anh"],
+    # Mã tổ hợp MỚI từ 2025 (chương trình GDPT 2018: có Tin học / Công nghệ / GDKT&PL)
+    "X05": ["Toán", "Vật lý", "Giáo dục kinh tế và pháp luật"],
+    "X06": ["Toán", "Vật lý", "Tin học"],
+    "X07": ["Toán", "Vật lý", "Công nghệ"],
+    "X10": ["Toán", "Hóa học", "Tin học"],
+    "X14": ["Toán", "Sinh học", "Tin học"],
+    "X26": ["Toán", "Tiếng Anh", "Tin học"],
     # Năng khiếu / Thể thao (tham khảo)
-    "H00": ["Ngữ văn", "Năng khiếu 1", "Năng khiếu 2"],
-    "T00": ["Toán", "Thể dục", "Năng khiếu"],
+    "H00": ["Ngữ văn", "Năng khiếu vẽ Nghệ thuật 1", "Năng khiếu vẽ Nghệ thuật 2"],
+    "T00": ["Toán", "Sinh học", "Năng khiếu TDTT"],
 }
 
 # Lookup ngược: từ danh sách môn → mã tổ hợp
@@ -195,6 +240,15 @@ _MON_ALIAS: dict[str, str] = {
     "tieng trung": "Tiếng Trung", "trung": "Tiếng Trung",
     "tieng phap": "Tiếng Pháp", "phap": "Tiếng Pháp",
     "tieng nga": "Tiếng Nga", "nga": "Tiếng Nga",
+    "vật lí": "Vật lý", "địa lí": "Địa lý",
+    "toán": "Toán", "lý": "Vật lý", "lí": "Vật lý", "sử": "Lịch sử", "địa": "Địa lý", "văn": "Ngữ văn",
+    "khtn": "Khoa học tự nhiên", "khoa hoc tu nhien": "Khoa học tự nhiên",
+    "khoa học tự nhiên": "Khoa học tự nhiên",
+    "khxh": "Khoa học xã hội", "khoa hoc xa hoi": "Khoa học xã hội",
+    "khoa học xã hội": "Khoa học xã hội",
+    "cong nghe": "Công nghệ", "công nghệ": "Công nghệ",
+    "gdktpl": "Giáo dục kinh tế và pháp luật",
+    "giáo dục kinh tế và pháp luật": "Giáo dục kinh tế và pháp luật",
 }
 
 def tra_to_hop(ma_to_hop: str) -> str | None:
@@ -227,11 +281,14 @@ def to_hop_context() -> str:
     lines.append("")
     lines.append("LƯU Ý QUAN TRỌNG — CÁC NHẦM LẪN PHỔ BIẾN:")
     lines.append("  - A01 = Toán, Vật lý, Tiếng ANH (KHÔNG phải Tin học)")
-    lines.append("  - A10 = Toán, Vật lý, Tin học (KHÔNG phải Tiếng Anh)")
-    lines.append("  - Toán + Lý + Tin → A10, KHÔNG phải A01")
+    lines.append("  - A10 = Toán, Vật lý, GDCD (KHÔNG phải Tiếng Anh, KHÔNG phải Tin học)")
+    lines.append("  - Toán + Lý + Tin học → X06 (mã mới từ 2025), KHÔNG phải A01 hay A10")
+    lines.append("  - Toán + Tiếng Anh + Tin học → X26 (mã mới từ 2025)")
     lines.append("  - B00 = Toán, Hóa, Sinh (KHÔNG có Vật lý)")
     lines.append("  - D01 = Ngữ văn, Toán, Tiếng Anh (KHÔNG phải Toán, Lý, Anh)")
     lines.append("  - C00 = Ngữ văn, Lịch sử, Địa lý (KHÔNG có Tiếng Anh)")
+    lines.append("  - Từ 2025 môn GDCD gọi là Giáo dục kinh tế và pháp luật; nhiều trường còn dùng "
+                 "mã tổ hợp mới có Tin học/Công nghệ → luôn đối chiếu đề án của từng trường")
     return "\n".join(lines)
 
 
@@ -249,6 +306,15 @@ _TUYEN_SINH_SITES = [
     "diemthi.24h.com.vn",
     "tuyensinh.vn",
 ]
+
+def _giai_ma_link_ddg(href: str) -> str:
+    """Link kết quả DuckDuckGo HTML là link chuyển hướng (//duckduckgo.com/l/?uddg=...) → lấy URL thật."""
+    if href.startswith("//"):
+        href = "https:" + href
+    if "duckduckgo.com/l/" in href:
+        return parse_qs(urlparse(href).query).get("uddg", [""])[0]
+    return href
+
 
 def _google_search_urls(query: str, num: int = 5) -> list[str]:
     """
@@ -268,13 +334,13 @@ def _google_search_urls(query: str, num: int = 5) -> list[str]:
         soup = BeautifulSoup(resp.text, "html.parser")
         urls = []
         for a in soup.select("a.result__url"):
-            href = a.get("href", "")
-            if href.startswith("http") and len(urls) < num:
+            href = _giai_ma_link_ddg(a.get("href", "").strip())
+            if href.startswith("http") and "duckduckgo.com" not in href and len(urls) < num:
                 urls.append(href)
         # fallback: lấy tất cả link kết quả
         if not urls:
             for a in soup.select(".result__title a"):
-                href = a.get("href", "")
+                href = _giai_ma_link_ddg(a.get("href", "").strip())
                 if "duckduckgo.com" not in href and href.startswith("http"):
                     urls.append(href)
                 if len(urls) >= num:
@@ -353,7 +419,11 @@ def _parse_image_desc(desc: str) -> dict:
     loai: 'plot' | 'geometry' | 'concept_map' | 'vector' | 'unit_circle'
     """
     d = desc.lower()
-    if any(k in d for k in ["concept map", "concept_map", "mind map", "sơ đồ", "diagram"]):
+    # "force diagram" / sơ đồ lực / mặt phẳng nghiêng là hình vật lý, không phải concept map
+    la_hinh_vat_ly = any(k in d for k in ["force", "lực", "inclined plane", "mặt phẳng nghiêng"])
+    if any(k in d for k in ["concept map", "concept_map", "mind map"]):
+        return {"loai": "concept_map"}
+    if not la_hinh_vat_ly and any(k in d for k in ["sơ đồ", "diagram"]):
         return {"loai": "concept_map"}
     if any(k in d for k in ["unit circle", "vòng tròn đơn vị", "circle sin cos"]):
         return {"loai": "unit_circle"}
@@ -364,6 +434,58 @@ def _parse_image_desc(desc: str) -> dict:
         return {"loai": "vector"}
     # Mặc định: vẽ đồ thị hàm số
     return {"loai": "plot"}
+
+
+# Từ kết thúc một biểu thức y=... trong mô tả (vd: "y=x^2 and y=2*x+1 on same axes")
+_FUNC_END = r'(?:,|;|\band\b|\bon\b|\bwith\b|\bfor\b|\bvà\b|\btrên\b|$)'
+
+
+def _tinh_bieu_thuc(expr: str, x):
+    """
+    Tính y(x) từ chuỗi biểu thức do AI sinh ra.
+    KHÔNG dùng eval(): chỉ cho phép số, biến x, pi, e, các phép + - * / ** và vài hàm toán.
+    Bất kỳ thứ gì khác (thuộc tính, import, gọi hàm lạ...) → ValueError.
+    """
+    ham = {"sqrt": np.sqrt, "sin": np.sin, "cos": np.cos, "tan": np.tan,
+           "log": np.log, "ln": np.log, "abs": np.abs, "exp": np.exp}
+    hang = {"pi": np.pi, "e": np.e}
+    if len(expr) > 120:
+        raise ValueError("biểu thức quá dài")
+    cay = ast.parse(expr.strip().replace("^", "**"), mode="eval")
+
+    def _ev(n):
+        if isinstance(n, ast.Expression):
+            return _ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) \
+                and not isinstance(n.value, bool):
+            return float(n.value)          # ép float để 9**9**9 báo Overflow thay vì treo máy
+        if isinstance(n, ast.Name):
+            if n.id == "x":
+                return x
+            if n.id in hang:
+                return hang[n.id]
+            raise ValueError(f"tên không hợp lệ: {n.id}")
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            v = _ev(n.operand)
+            return -v if isinstance(n.op, ast.USub) else v
+        if isinstance(n, ast.BinOp):
+            a, b = _ev(n.left), _ev(n.right)
+            if isinstance(n.op, ast.Add):
+                return a + b
+            if isinstance(n.op, ast.Sub):
+                return a - b
+            if isinstance(n.op, ast.Mult):
+                return a * b
+            if isinstance(n.op, ast.Div):
+                return a / b
+            if isinstance(n.op, ast.Pow):
+                return a ** b
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                and n.func.id in ham and len(n.args) == 1 and not n.keywords:
+            return ham[n.func.id](_ev(n.args[0]))
+        raise ValueError("biểu thức không được hỗ trợ")
+
+    return _ev(cay)
 
 
 def _ve_plot(desc: str):
@@ -377,45 +499,32 @@ def _ve_plot(desc: str):
     plotted = 0
 
     # Trích hàm số từ mô tả (dạng y=..., f(x)=...)
-    funcs = re.findall(r'y\s*=\s*([^,\[\]]+?)(?:,|\band\b|$)', desc, re.IGNORECASE)
+    funcs = re.findall(r'y\s*=\s*([^,;\[\]]+?)' + _FUNC_END, desc, re.IGNORECASE)
     if not funcs:
-        funcs = re.findall(r'f\(x\)\s*=\s*([^,\[\]]+?)(?:,|\band\b|$)', desc, re.IGNORECASE)
+        funcs = re.findall(r'f\(x\)\s*=\s*([^,;\[\]]+?)' + _FUNC_END, desc, re.IGNORECASE)
     if not funcs:
         # Fallback: vẽ y=x^2 nếu không parse được
         funcs = ["x**2"]
 
-    for i, expr in enumerate(funcs[:5]):
-        expr_py = (expr.strip()
-                   .replace("^", "**")
-                   .replace("sqrt", "np.sqrt")
-                   .replace("sin", "np.sin")
-                   .replace("cos", "np.cos")
-                   .replace("tan", "np.tan")
-                   .replace("log", "np.log")
-                   .replace("abs", "np.abs")
-                   .replace("pi", "np.pi")
-                   .replace("exp", "np.exp"))
-        try:
-            y = eval(expr_py, {"x": x, "np": np, "__builtins__": {}})
-            label = f"y = {expr.strip()}"
-            ax.plot(x, y, color=colors[i % len(colors)], linewidth=2.2, label=label)
-            plotted += 1
-        except Exception:
-            continue
+    ys_ok = []   # giá trị y của các hàm đã vẽ được (dùng lại để tìm giao điểm)
+    with np.errstate(all="ignore"):
+        for i, expr in enumerate(funcs[:5]):
+            try:
+                y = _tinh_bieu_thuc(expr, x) * np.ones_like(x)   # y = hằng số vẫn ra mảng
+                label = f"y = {expr.strip()}"
+                ax.plot(x, y, color=colors[i % len(colors)], linewidth=2.2, label=label)
+                plotted += 1
+                ys_ok.append(y)
+            except Exception:
+                continue
 
     # Đánh dấu giao điểm nếu có 2 hàm
     if plotted == 2:
         try:
-            f1 = eval(funcs[0].strip().replace("^", "**").replace("sqrt","np.sqrt")
-                      .replace("sin","np.sin").replace("cos","np.cos")
-                      .replace("pi","np.pi"), {"x": x, "np": np, "__builtins__": {}})
-            f2 = eval(funcs[1].strip().replace("^", "**").replace("sqrt","np.sqrt")
-                      .replace("sin","np.sin").replace("cos","np.cos")
-                      .replace("pi","np.pi"), {"x": x, "np": np, "__builtins__": {}})
-            diff = f1 - f2
-            sign_change = np.where(np.diff(np.sign(diff)))[0]
-            for idx in sign_change[:6]:
-                ax.plot(x[idx], f1[idx], "o", color="#E05A2B", markersize=7, zorder=5)
+            diff = ys_ok[0] - ys_ok[1]
+            doi_dau = (np.diff(np.sign(diff)) != 0) & np.isfinite(diff[:-1]) & np.isfinite(diff[1:])
+            for idx in np.where(doi_dau)[0][:6]:
+                ax.plot(x[idx], ys_ok[0][idx], "o", color="#E05A2B", markersize=7, zorder=5)
         except Exception:
             pass
 
@@ -622,6 +731,11 @@ def xu_ly_anh_trong_tra_loi(tra_loi: str) -> tuple[str, list[str]]:
         else:
             log.warning(f"[VẼ HÌNH] Bỏ qua (lỗi): {mo_ta[:60]}")
     return tra_loi_sach, anh_b64_list
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHẦN 2 — PROMPTS (kịch bản cho từng AI agent)
+# ══════════════════════════════════════════════════════════════════════════════
 #
 # Mỗi agent có:
 #   - [TÊN]_SYSTEM : mô tả vai trò, viết 1 lần và cố định
@@ -803,7 +917,7 @@ Ngày hôm nay: {ngay_hom_nay}.
 3. Nếu user kể 3 môn → tra bảng ngược → cho biết mã tổ hợp
 4. Nếu không tìm thấy trong bảng → nói thẳng "tổ hợp này không có trong danh mục chuẩn"
 5. TUYỆT ĐỐI KHÔNG nói "A01 gồm Toán, Lý, Tin" — A01 là Toán, Vật lý, TIẾNG ANH
-6. TUYỆT ĐỐI KHÔNG nói "A10 gồm Toán, Lý, Anh" — A10 là Toán, Vật lý, TIN HỌC
+6. TUYỆT ĐỐI KHÔNG nói "A10 gồm Toán, Lý, Anh" hay "Toán, Lý, Tin" — A10 là Toán, Vật lý, GDCD; còn Toán, Lý, Tin học là X06
 7. Nhắc user kiểm tra đề án tuyển sinh từng trường vì tổ hợp xét tuyển có thể khác nhau 📋
 8. Cuối câu trả lời hỏi thêm nếu cần
 
@@ -1070,14 +1184,19 @@ def _tao_groq_client():
     return Groq(api_key=os.getenv("GROQ_API_KEY", GROQ_API_KEY))
 
 
+_EMBED_FN = None   # khởi tạo lười, dùng chung cho mọi lần gọi
+
+
 def _embed(texts: list[str]) -> list[list[float]]:
     """
     Tạo vector embedding dùng ChromaDB DefaultEmbeddingFunction (onnxruntime).
     Không cần API key, chạy hoàn toàn local.
     """
-    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-    ef = DefaultEmbeddingFunction()
-    return ef(texts)
+    global _EMBED_FN
+    if _EMBED_FN is None:
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+        _EMBED_FN = DefaultEmbeddingFunction()
+    return _EMBED_FN(texts)
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -1267,7 +1386,7 @@ def nap_web(collection, groq_client):
         log.info(f"  → {len(chunks)} chunks từ {url}")
         documents = chunks
         metadatas = [{"nguon": "web", "url": url, "truong": truong,
-                      "loai": "thong_tin_truong", "nam": 2024,
+                      "loai": "thong_tin_truong", "nam": datetime.now().year,
                       "chunk_idx": i, "nganh": "", "to_hop": ""}
                      for i in range(len(chunks))]
         ids = [str(uuid.uuid4()) for _ in chunks]
@@ -1379,8 +1498,9 @@ class TuVanTuyenSinh:
         # Bước 1: Gọi vision model phân tích ảnh
         try:
             vision_resp = self.groq.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                model=VISION_MODEL,
                 max_tokens=2000,
+                extra_body=_reasoning_extra(VISION_MODEL),
                 messages=[
                     {
                         "role": "user",
@@ -1434,29 +1554,39 @@ class TuVanTuyenSinh:
         last_error = None
         for model in LLM_MODELS:
             try:
-                # Qwen3 có chế độ "thinking" mặc định — tắt bằng extra_body
-                # (Groq dùng extra_body thay vì param trực tiếp)
-                kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens}
-                if "qwen3" in model:
-                    kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+                # gpt-oss / Qwen3.8 là model có reasoning → chỉnh mức suy luận qua extra_body.
+                # Token suy luận cũng tính vào max_tokens nên cộng thêm dư địa (+800)
+                # để câu trả lời không bị cắt/rỗng.
+                kwargs = {"model": model, "messages": messages, "max_tokens": max_tokens + 800}
+                extra = _reasoning_extra(model)
+                if extra:
+                    kwargs["extra_body"] = extra
                 resp = self.groq.chat.completions.create(**kwargs)
+                noi_dung = (resp.choices[0].message.content or "").strip()
+                noi_dung = re.sub(r"<think>.*?</think>", "", noi_dung, flags=re.DOTALL).strip()
+                if not noi_dung:
+                    log.warning(f"[Fallback] {model} trả về rỗng → thử model tiếp")
+                    last_error = ValueError("phản hồi rỗng")
+                    continue
                 if model != LLM_MODELS[0]:
                     log.info(f"[Fallback] Đang dùng model dự phòng: {model}")
-                return resp.choices[0].message.content.strip()
+                return noi_dung
             except Exception as e:
                 err_str = str(e).lower()
                 # Chỉ fallback khi lỗi quota/rate-limit, còn lỗi khác thì raise luôn
                 if any(k in err_str for k in ["rate_limit", "rate limit", "429",
                                                "quota", "capacity", "overloaded",
                                                "tokens per", "requests per",
-                                               "decommissioned", "no longer supported"]):
+                                               "decommissioned", "no longer supported",
+                                               "model_not_found", "does not exist", "404"]):
                     log.warning(f"[Fallback] {model} hết quota → thử model tiếp: {e}")
                     last_error = e
                     time.sleep(0.5)   # nghỉ nhẹ trước khi thử model kế
                     continue
                 raise  # lỗi khác (auth, network...) → không fallback
         raise Exception(
-            f"Tất cả model Groq đều đang quá tải. Vui lòng thử lại sau ít phút. "
+            f"Tất cả model Groq đều không dùng được (hết quota, quá tải, hoặc model đã bị khai tử "
+            f"— kiểm tra LLM_MODELS). Vui lòng thử lại sau ít phút. "
             f"(Lỗi cuối: {last_error})"
         )
 
@@ -1471,13 +1601,14 @@ class TuVanTuyenSinh:
                 max_tokens=200,
             )
             text = text.replace("```json", "").replace("```", "").strip()
-            data = json.loads(text)
-            agents = data.get("agents", ["nganh"])
-            can_hoi_them = data.get("can_hoi_them", "").strip()
+            m = re.search(r"\{.*\}", text, re.DOTALL)   # bỏ chữ thừa quanh JSON (nếu có)
+            data = json.loads(m.group(0) if m else text)
+            agents = data.get("agents") or ["nganh"]
+            can_hoi_them = (data.get("can_hoi_them") or "").strip()
             hop_le = {"diem_chuan", "truong", "nganh", "to_hop", "huong_nghiep", "hoc_tap", "kien_thuc"}
             agents_sach = [a for a in agents if a in hop_le] or ["nganh"]
             return agents_sach, can_hoi_them
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, AttributeError, TypeError):
             return ["nganh"], ""
 
     def _tim_du_lieu(self, cau_hoi: str, loai_filter: str = None) -> str:
@@ -1596,7 +1727,10 @@ def chay_chat():
             bot.reset_lich_su()
             print("--- Bắt đầu hội thoại mới ---")
             continue
-        print(f"\nAI: {bot.hoi(cau_hoi)}")
+        kq = bot.hoi(cau_hoi)   # dict: {"tra_loi": str, "anh": [base64...]}
+        print(f"\nAI: {kq['tra_loi']}")
+        if kq.get("anh"):
+            print(f"   (kèm {len(kq['anh'])} hình minh hoạ — xem được khi chạy qua server/web)")
 
 
 def chay_server(port: int = 8000):
@@ -1605,7 +1739,7 @@ def chay_server(port: int = 8000):
 
     Nhóm web gọi: POST http://localhost:8000/hoi
     Body JSON: { "session_id": "user_abc", "cau_hoi": "Em hỏi gì đó..." }
-    Response:  { "tra_loi": "...", "session_id": "user_abc" }
+    Response:  { "tra_loi": "...", "anh": ["<base64 PNG>", ...], "session_id": "user_abc" }
     """
     from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -1629,8 +1763,8 @@ def chay_server(port: int = 8000):
                 if not cau_hoi:
                     self._json({"loi": "Thiếu câu hỏi"}, 400)
                     return
-                tra_loi = lay_bot(sid).hoi(cau_hoi)
-                self._json({"tra_loi": tra_loi, "session_id": sid})
+                kq = lay_bot(sid).hoi(cau_hoi)   # dict: {"tra_loi": str, "anh": [base64...]}
+                self._json({"tra_loi": kq["tra_loi"], "anh": kq["anh"], "session_id": sid})
             except Exception as e:
                 self._json({"loi": str(e)}, 500)
 
@@ -1668,9 +1802,9 @@ def _huong_dan():
 ╚══════════════════════════════════════════════════════╝
 
 Lần đầu dùng:
-  1. pip install chromadb google-generativeai pandas pdfplumber
-              requests beautifulsoup4 sentence-transformers
-              tqdm python-dotenv openpyxl
+  1. pip install chromadb groq pandas pdfplumber
+              requests beautifulsoup4 tqdm python-dotenv openpyxl
+              matplotlib networkx numpy
   2. Tạo file .env và thêm: GROQ_API_KEY=gsk_...
   3. Để file dữ liệu vào data/excel/ hoặc data/pdf/
   4. python tuyen_sinh_AI.py ingest
